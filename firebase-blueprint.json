@@ -1,0 +1,272 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "User account registration, approval status, role, and Pickerwel preferences.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Firebase Auth UID of the account owner."
+        },
+        "displayName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80,
+          "description": "Display name shown in the dashboard."
+        },
+        "email": {
+          "type": "string",
+          "maxLength": 120,
+          "description": "Account email shown only to the owner and admins for approval review."
+        },
+        "role": {
+          "type": "string",
+          "enum": ["user", "admin"],
+          "description": "User role for access control."
+        },
+        "status": {
+          "type": "string",
+          "enum": ["pending", "approved", "rejected"],
+          "description": "Admin approval status for account registration."
+        },
+        "theme": {
+          "type": "string",
+          "enum": ["light", "dark"],
+          "description": "Preferred UI color theme."
+        },
+        "language": {
+          "type": "string",
+          "enum": ["km", "en"],
+          "description": "Preferred UI language."
+        },
+        "soundEnabled": {
+          "type": "boolean",
+          "description": "Whether wheel tick and winner celebration sounds are enabled."
+        },
+        "confettiEnabled": {
+          "type": "boolean",
+          "description": "Whether confetti animation plays on winner reveal."
+        },
+        "hapticsEnabled": {
+          "type": "boolean",
+          "description": "Whether vibration feedback is enabled on supported devices."
+        },
+        "spinDuration": {
+          "type": "number",
+          "description": "Spin duration in seconds (3 to 10)."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server creation timestamp."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server last update timestamp."
+        },
+        "reviewedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when registration was created or reviewed by an admin."
+        },
+        "reviewedBy": {
+          "type": "string",
+          "maxLength": 128,
+          "description": "UID of the admin who approved or rejected the registration."
+        }
+      },
+      "required": [
+        "uid",
+        "displayName",
+        "email",
+        "role",
+        "status",
+        "theme",
+        "language",
+        "soundEnabled",
+        "confettiEnabled",
+        "hapticsEnabled",
+        "spinDuration",
+        "createdAt",
+        "updatedAt",
+        "reviewedAt",
+        "reviewedBy"
+      ]
+    },
+    "AdminMember": {
+      "title": "AdminMember",
+      "description": "Trusted admin UID registry.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Firebase Auth UID of the administrator."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Timestamp when admin privilege was granted."
+        }
+      },
+      "required": ["uid", "createdAt"]
+    },
+    "Wheel": {
+      "title": "Wheel",
+      "description": "A saved picker wheel owned by an approved user.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Document identifier for the wheel."
+        },
+        "ownerId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "UID of the wheel owner."
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120,
+          "description": "Title of the picker wheel."
+        },
+        "entries": {
+          "type": "array",
+          "description": "Bounded list of up to 200 segment labels on the wheel."
+        },
+        "paletteId": {
+          "type": "string",
+          "enum": ["vibrant", "classroom", "sunset", "ocean"],
+          "description": "Color palette identifier for wheel segments."
+        },
+        "spinCount": {
+          "type": "number",
+          "description": "Total completed spins for this wheel."
+        },
+        "lastWinner": {
+          "type": "string",
+          "maxLength": 120,
+          "description": "Most recent winning entry label."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server creation timestamp."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server last update timestamp."
+        }
+      },
+      "required": [
+        "id",
+        "ownerId",
+        "title",
+        "entries",
+        "paletteId",
+        "spinCount",
+        "lastWinner",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "SpinResult": {
+      "title": "SpinResult",
+      "description": "A recorded spin outcome for an approved user's wheel.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Document identifier for the spin result."
+        },
+        "ownerId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "UID of the user who spun the wheel."
+        },
+        "wheelId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Identifier of the wheel that was spun."
+        },
+        "wheelTitle": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120,
+          "description": "Snapshot title of the wheel at spin time."
+        },
+        "winner": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120,
+          "description": "Winning entry label."
+        },
+        "winnerColor": {
+          "type": "string",
+          "minLength": 7,
+          "maxLength": 7,
+          "pattern": "^#[0-9a-fA-F]{6}$",
+          "description": "Hex color of the winning segment."
+        },
+        "removedAfterSpin": {
+          "type": "boolean",
+          "description": "Whether the winner was removed from the wheel after this spin."
+        },
+        "spunAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of the spin."
+        }
+      },
+      "required": [
+        "id",
+        "ownerId",
+        "wheelId",
+        "wheelTitle",
+        "winner",
+        "winnerColor",
+        "removedAfterSpin",
+        "spunAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserProfile" },
+      "description": "Stores user registration requests, approval status, role, and preferences."
+    },
+    "/admins/{adminUid}": {
+      "schema": { "$ref": "#/entities/AdminMember" },
+      "description": "Stores additional admin UIDs approved by the bootstrapped administrator."
+    },
+    "/users/{userId}/wheels/{wheelId}": {
+      "schema": { "$ref": "#/entities/Wheel" },
+      "description": "Stores saved picker wheels belonging to an approved user."
+    },
+    "/users/{userId}/spinResults/{resultId}": {
+      "schema": { "$ref": "#/entities/SpinResult" },
+      "description": "Stores spin history records belonging to an approved user."
+    }
+  }
+}

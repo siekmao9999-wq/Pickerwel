@@ -1,0 +1,243 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Global Safety Net: Default deny all reads and writes
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Hardened Global Helpers
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerifiedUser() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isOwner(userId) {
+      return isVerifiedUser() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isVerifiedUser() && (
+        request.auth.token.email == 'siekmao9999@gmail.com' ||
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+    }
+
+    function isApprovedUser(userId) {
+      return exists(/databases/$(database)/documents/users/$(userId)) &&
+        get(/databases/$(database)/documents/users/$(userId)).data.uid == request.auth.uid &&
+        get(/databases/$(database)/documents/users/$(userId)).data.status == 'approved';
+    }
+
+    // Entity Validation Helpers
+    function isValidUserProfile(data, userId) {
+      return data.keys().hasAll([
+          'uid', 'displayName', 'email', 'role', 'status',
+          'theme', 'language', 'soundEnabled', 'confettiEnabled',
+          'hapticsEnabled', 'spinDuration',
+          'createdAt', 'updatedAt', 'reviewedAt', 'reviewedBy'
+        ]) &&
+        data.keys().hasOnly([
+          'uid', 'displayName', 'email', 'role', 'status',
+          'theme', 'language', 'soundEnabled', 'confettiEnabled',
+          'hapticsEnabled', 'spinDuration',
+          'createdAt', 'updatedAt', 'reviewedAt', 'reviewedBy'
+        ]) &&
+        isValidId(data.uid) &&
+        data.uid == userId &&
+        data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 80 &&
+        data.email is string && data.email.size() <= 120 &&
+        data.role in ['user', 'admin'] &&
+        data.status in ['pending', 'approved', 'rejected'] &&
+        data.theme in ['light', 'dark'] &&
+        data.language in ['km', 'en'] &&
+        data.soundEnabled is bool &&
+        data.confettiEnabled is bool &&
+        data.hapticsEnabled is bool &&
+        (data.spinDuration is int || data.spinDuration is float) &&
+        data.spinDuration >= 3 && data.spinDuration <= 10 &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp &&
+        data.reviewedAt is timestamp &&
+        data.reviewedBy is string && data.reviewedBy.size() <= 128;
+    }
+
+    function isValidAdminMember(data, adminUid) {
+      return data.keys().hasAll(['uid', 'createdAt']) &&
+        data.keys().hasOnly(['uid', 'createdAt']) &&
+        isValidId(data.uid) &&
+        data.uid == adminUid &&
+        data.createdAt is timestamp;
+    }
+
+    function isValidWheel(data, userId, wheelId) {
+      return data.keys().hasAll([
+          'id', 'ownerId', 'title', 'entries', 'paletteId',
+          'spinCount', 'lastWinner', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'id', 'ownerId', 'title', 'entries', 'paletteId',
+          'spinCount', 'lastWinner', 'createdAt', 'updatedAt'
+        ]) &&
+        isValidId(data.id) &&
+        data.id == wheelId &&
+        isValidId(data.ownerId) &&
+        data.ownerId == userId &&
+        data.ownerId == request.auth.uid &&
+        data.title is string && data.title.size() >= 1 && data.title.size() <= 120 &&
+        data.entries is list &&
+        data.entries.size() <= 200 &&
+        (data.entries.size() == 0 || (data.entries[0] is string && data.entries[0].size() <= 120)) &&
+        data.paletteId in ['vibrant', 'classroom', 'sunset', 'ocean'] &&
+        (data.spinCount is int || data.spinCount is float) &&
+        data.spinCount >= 0 && data.spinCount <= 1000000 &&
+        data.lastWinner is string && data.lastWinner.size() <= 120 &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidSpinResult(data, userId, resultId) {
+      return data.keys().hasAll([
+          'id', 'ownerId', 'wheelId', 'wheelTitle',
+          'winner', 'winnerColor', 'removedAfterSpin', 'spunAt'
+        ]) &&
+        data.keys().hasOnly([
+          'id', 'ownerId', 'wheelId', 'wheelTitle',
+          'winner', 'winnerColor', 'removedAfterSpin', 'spunAt'
+        ]) &&
+        isValidId(data.id) &&
+        data.id == resultId &&
+        isValidId(data.ownerId) &&
+        data.ownerId == userId &&
+        data.ownerId == request.auth.uid &&
+        isValidId(data.wheelId) &&
+        data.wheelTitle is string && data.wheelTitle.size() >= 1 && data.wheelTitle.size() <= 120 &&
+        data.winner is string && data.winner.size() >= 1 && data.winner.size() <= 120 &&
+        data.winnerColor is string && data.winnerColor.size() == 7 &&
+        data.winnerColor.matches('^#[0-9a-fA-F]{6}$') &&
+        data.removedAfterSpin is bool &&
+        data.spunAt is timestamp;
+    }
+
+    // Admin Registry Collection
+    match /admins/{adminUid} {
+      allow get: if isValidId(adminUid) && (isOwner(adminUid) || isAdmin());
+      allow list: if isAdmin();
+      allow create: if isValidId(adminUid) &&
+        isAdmin() &&
+        isValidAdminMember(incoming(), adminUid) &&
+        incoming().createdAt == request.time;
+      allow update: if false;
+      allow delete: if isValidId(adminUid) && isAdmin() && adminUid != request.auth.uid;
+    }
+
+    // User Profile Collection (Owner + Admin Approval Gate)
+    match /users/{userId} {
+      allow get: if isValidId(userId) && (isOwner(userId) || isAdmin());
+      allow list: if isAdmin();
+      allow create: if isValidId(userId) &&
+        isOwner(userId) &&
+        isValidUserProfile(incoming(), userId) &&
+        incoming().uid == request.auth.uid &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        incoming().reviewedAt == request.time &&
+        (
+          (isAdmin() && incoming().role == 'admin' && incoming().status == 'approved') ||
+          (!isAdmin() && incoming().role == 'user' && incoming().status == 'pending' && incoming().reviewedBy == '')
+        );
+      allow update: if isValidId(userId) &&
+        isValidUserProfile(incoming(), userId) &&
+        incoming().uid == existing().uid &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        (
+          (
+            isAdmin() &&
+            incoming().reviewedAt == request.time &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'status', 'role', 'reviewedAt', 'reviewedBy', 'updatedAt'
+            ])
+          ) ||
+          (
+            isOwner(userId) &&
+            existing().status == 'approved' &&
+            incoming().status == existing().status &&
+            incoming().role == existing().role &&
+            incoming().reviewedAt == existing().reviewedAt &&
+            incoming().reviewedBy == existing().reviewedBy &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'displayName', 'email', 'theme', 'language',
+              'soundEnabled', 'confettiEnabled', 'hapticsEnabled',
+              'spinDuration', 'updatedAt'
+            ])
+          )
+        );
+      allow delete: if isValidId(userId) && isAdmin() && userId != request.auth.uid;
+
+      // Saved Wheels Subcollection (Approved Users Only)
+      match /wheels/{wheelId} {
+        allow get: if isValidId(userId) && isValidId(wheelId) && isOwner(userId) && isApprovedUser(userId);
+        allow list: if isValidId(userId) && isOwner(userId) && resource.data.ownerId == request.auth.uid;
+        allow create: if isValidId(userId) &&
+          isValidId(wheelId) &&
+          isOwner(userId) &&
+          isValidWheel(incoming(), userId, wheelId) &&
+          incoming().createdAt == request.time &&
+          incoming().updatedAt == request.time &&
+          isApprovedUser(userId);
+        allow update: if isValidId(userId) &&
+          isValidId(wheelId) &&
+          isOwner(userId) &&
+          isValidWheel(incoming(), userId, wheelId) &&
+          incoming().id == existing().id &&
+          incoming().ownerId == existing().ownerId &&
+          incoming().createdAt == existing().createdAt &&
+          incoming().updatedAt == request.time &&
+          isApprovedUser(userId) &&
+          (
+            incoming().diff(existing()).affectedKeys().hasOnly(['title', 'entries', 'paletteId', 'updatedAt']) ||
+            incoming().diff(existing()).affectedKeys().hasOnly(['entries', 'spinCount', 'lastWinner', 'updatedAt']) ||
+            incoming().diff(existing()).affectedKeys().hasOnly(['spinCount', 'lastWinner', 'updatedAt'])
+          );
+        allow delete: if isValidId(userId) &&
+          isValidId(wheelId) &&
+          isOwner(userId) &&
+          isApprovedUser(userId);
+      }
+
+      // Spin Results History Subcollection (Approved Users Only)
+      match /spinResults/{resultId} {
+        allow get: if isValidId(userId) && isValidId(resultId) && isOwner(userId) && isApprovedUser(userId);
+        allow list: if isValidId(userId) && isOwner(userId) && resource.data.ownerId == request.auth.uid;
+        allow create: if isValidId(userId) &&
+          isValidId(resultId) &&
+          isOwner(userId) &&
+          isValidSpinResult(incoming(), userId, resultId) &&
+          incoming().spunAt == request.time &&
+          isApprovedUser(userId);
+        allow update: if false;
+        allow delete: if isValidId(userId) &&
+          isValidId(resultId) &&
+          isOwner(userId) &&
+          isApprovedUser(userId);
+      }
+    }
+  }
+}
