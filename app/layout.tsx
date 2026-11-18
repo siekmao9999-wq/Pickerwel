@@ -1,29 +1,7 @@
 import type { Metadata, Viewport } from 'next';
-import { Kantumruy_Pro, Siemreap, Poppins } from 'next/font/google';
 import './globals.css';
 import { PickerwelProvider } from '@/components/PickerwelProvider';
 import { PickerwelShell } from '@/components/PickerwelShell';
-
-const kantumruyPro = Kantumruy_Pro({
-  subsets: ['khmer', 'latin'],
-  weight: ['500', '600', '700'],
-  variable: '--font-kantumruy',
-  display: 'swap',
-});
-
-const siemreap = Siemreap({
-  subsets: ['khmer'],
-  weight: ['400'],
-  variable: '--font-siemreap',
-  display: 'swap',
-});
-
-const poppins = Poppins({
-  subsets: ['latin'],
-  weight: ['400', '500', '600', '700'],
-  variable: '--font-poppins',
-  display: 'swap',
-});
 
 export const viewport: Viewport = {
   themeColor: '#3B82F6',
@@ -61,11 +39,16 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html
-      lang="km"
-      className={`${kantumruyPro.variable} ${siemreap.variable} ${poppins.variable}`}
-      suppressHydrationWarning
-    >
+    <html lang="km" suppressHydrationWarning>
+      <head>
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
+        {/* eslint-disable-next-line @next/next/no-page-custom-font */}
+        <link
+          rel="stylesheet"
+          href="https://fonts.googleapis.com/css2?family=Kantumruy+Pro:wght@500;600;700&family=Poppins:wght@400;500;600;700&family=Siemreap&display=swap"
+        />
+      </head>
       <body
         className="bg-[#F8FAFC] text-slate-900 dark:bg-[#0F172A] dark:text-slate-100 antialiased"
         suppressHydrationWarning

@@ -19,6 +19,7 @@ import {
   Clock,
   Gamepad2,
   Users,
+  Github,
 } from 'lucide-react';
 import { usePickerwel, type NavSection } from './PickerwelProvider';
 import { AuthModal } from './AuthModal';
@@ -87,6 +88,7 @@ export function PickerwelShell({ children }: { children: React.ReactNode }) {
     { id: 'games', label: t.navGames, icon: Gamepad2 },
     { id: 'stopwatch', label: t.navStopwatch, icon: Watch },
     { id: 'history', label: t.navHistory, icon: History },
+    { id: 'github', label: t.navGitHub, icon: Github },
     { id: 'settings', label: t.navSettings, icon: Settings },
     ...(isAdmin
       ? [

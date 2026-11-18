@@ -1,6 +1,12 @@
 @import "tailwindcss";
 @custom-variant dark (&:where(.dark, .dark *));
 
+:root {
+  --font-kantumruy: 'Kantumruy Pro';
+  --font-siemreap: 'Siemreap';
+  --font-poppins: 'Poppins';
+}
+
 @layer base {
   html {
     font-family: var(--font-siemreap), var(--font-poppins), system-ui, sans-serif;

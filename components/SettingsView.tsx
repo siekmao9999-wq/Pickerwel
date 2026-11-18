@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
-import { Sun, Moon, Volume2, PartyPopper, Smartphone, Languages, Timer, Wifi, Music, Wind, Sparkles, Disc3, Waves } from 'lucide-react';
+import { Sun, Moon, Volume2, PartyPopper, Smartphone, Languages, Timer, Wifi, Music, Wind, Sparkles, Disc3, Waves, Github, ArrowRight } from 'lucide-react';
 import { usePickerwel } from './PickerwelProvider';
 import { PWAInstallButton } from './PWAInstallButton';
 import { WHEEL_PALETTES, type PaletteId } from '@/lib/palettes';
@@ -9,7 +9,7 @@ import { SPIN_SOUND_OPTIONS, previewSpinSound, type SpinSoundId } from '@/lib/so
 import { COPY } from '@/lib/i18n';
 
 export function SettingsView() {
-  const { settings, updateSettings, activeWheel, updateActiveWheel } = usePickerwel();
+  const { settings, updateSettings, activeWheel, updateActiveWheel, setActiveNav } = usePickerwel();
   const [previewingId, setPreviewingId] = useState<SpinSoundId | null>(null);
   const t = COPY[settings.language];
   const isKm = settings.language === 'km';
@@ -305,6 +305,29 @@ export function SettingsView() {
           <div className="shrink-0">
             <PWAInstallButton language={settings.language} compact />
           </div>
+        </div>
+
+        {/* GitHub API Integration Shortcut */}
+        <div className="p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="flex items-start gap-3">
+            <Github className="w-5 h-5 text-slate-900 dark:text-white mt-0.5 shrink-0" />
+            <div>
+              <span className="block text-sm font-semibold text-slate-900 dark:text-white">
+                {t.ghSettingsCtaTitle}
+              </span>
+              <span className="block text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                {t.ghSettingsCtaDesc}
+              </span>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => setActiveNav('github')}
+            className="min-h-[40px] px-4 py-2 rounded-xl bg-slate-900 dark:bg-white hover:bg-slate-800 dark:hover:bg-slate-100 text-white dark:text-slate-900 text-xs font-semibold inline-flex items-center justify-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap shrink-0 self-start sm:self-auto"
+          >
+            <span>{t.ghSettingsOpenBtn}</span>
+            <ArrowRight className="w-3.5 h-3.5 shrink-0" />
+          </button>
         </div>
       </div>
     </div>

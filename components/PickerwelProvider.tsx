@@ -67,6 +67,7 @@ export type NavSection =
   | 'games'
   | 'stopwatch'
   | 'history'
+  | 'github'
   | 'settings'
   | 'admin';
 
@@ -78,6 +79,7 @@ export const NAV_ROUTES: Record<NavSection, string> = {
   games: '/games',
   stopwatch: '/stopwatch',
   history: '/history',
+  github: '/github',
   settings: '/settings',
   admin: '/admin',
 };
@@ -90,6 +92,7 @@ function navFromPathname(pathname: string | null): NavSection {
   if (pathname.startsWith('/games')) return 'games';
   if (pathname.startsWith('/stopwatch')) return 'stopwatch';
   if (pathname.startsWith('/history')) return 'history';
+  if (pathname.startsWith('/github')) return 'github';
   if (pathname.startsWith('/settings')) return 'settings';
   if (pathname.startsWith('/admin')) return 'admin';
   return 'home';
