@@ -48,7 +48,7 @@ export function WinnerModal({
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className="relative w-full max-w-md overflow-hidden rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xl">
+      <div className="relative w-full max-w-md max-h-[92dvh] overflow-y-auto rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xl">
         {/* Top Color Accent Strip matching winning segment */}
         <div
           className="h-3 w-full"
@@ -65,7 +65,7 @@ export function WinnerModal({
           <X className="w-5 h-5" />
         </button>
 
-        <div className="px-6 pt-7 pb-6 text-center">
+        <div className="px-5 sm:px-6 pt-6 sm:pt-7 pb-6 text-center">
           <div
             className="mx-auto mb-4 w-14 h-14 rounded-2xl flex items-center justify-center text-white shadow-md"
             style={{ backgroundColor: result.winnerColor }}

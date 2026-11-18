@@ -1,6 +1,14 @@
-const CACHE_NAME = 'pickerwel-offline-v2';
+const CACHE_NAME = 'pickerwel-offline-v3';
 const APP_SHELL_ASSETS = [
   '/',
+  '/wheels',
+  '/templates',
+  '/groups',
+  '/games',
+  '/stopwatch',
+  '/history',
+  '/settings',
+  '/scan',
   '/manifest.webmanifest',
   '/icon.svg',
   '/pwa-192x192.png',
@@ -10,7 +18,10 @@ const APP_SHELL_ASSETS = [
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(APP_SHELL_ASSETS)).catch(() => {})
+    caches
+      .open(CACHE_NAME)
+      .then((cache) => Promise.allSettled(APP_SHELL_ASSETS.map((url) => cache.add(url))))
+      .catch(() => {})
   );
   self.skipWaiting();
 });
@@ -67,8 +78,8 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // In dev server, bypass SW cache for Next.js webpack chunks to avoid chunk mismatch errors
-  if (isDevHost && url.pathname.startsWith('/_next/')) {
+  // In dev server, bypass SW cache for Next.js webpack chunks and RSC payloads to avoid chunk mismatch errors
+  if (isDevHost && (url.pathname.startsWith('/_next/') || url.searchParams.has('_rsc'))) {
     return;
   }
 

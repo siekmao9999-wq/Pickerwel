@@ -19,13 +19,26 @@ import {
   Pencil,
 } from 'lucide-react';
 import { usePickerwel } from '../PickerwelProvider';
-import type { OfflineQuiz } from '@/lib/offline-quizzes';
+import { MathText } from '../MathText';
+import type { QuizCreatePreset } from './SubjectGradeQuizPicker';
+import {
+  getGradeLabel,
+  getSubjectLabel,
+  GRADE_GROUPS,
+  GRADE_LEVELS,
+  resolveQuizGradeId,
+  resolveQuizSubjectId,
+  SUBJECT_CATALOG,
+  type GradeId,
+  type OfflineQuiz,
+  type SubjectId,
+} from '@/lib/offline-quizzes';
 import { playCorrectSound, playWrongSound, playWinSound, playTickSound, triggerHaptic } from '@/lib/sound';
 import { COPY } from '@/lib/i18n';
 
 interface KahootGameProps {
   quizzes: OfflineQuiz[];
-  onCreateQuiz: () => void;
+  onCreateQuiz: (preset?: QuizCreatePreset) => void;
   onEditQuiz: (quiz: OfflineQuiz) => void;
 }
 
@@ -68,6 +81,8 @@ export function KahootGame({
 
   const [phase, setPhase] = useState<'LOBBY' | 'QUESTION' | 'REVEAL' | 'PODIUM'>('LOBBY');
   const [selectedQuizId, setSelectedQuizId] = useState<string>(quizzes[0]?.id || '');
+  const [filterSubject, setFilterSubject] = useState<'all' | SubjectId>('all');
+  const [filterGrade, setFilterGrade] = useState<'all' | GradeId>('all');
   const [playMode, setPlayMode] = useState<'solo' | 'teams'>('solo');
   const [players, setPlayers] = useState<PlayerScore[]>([
     { name: 'ក្រុម A', score: 0, correctCount: 0 },
@@ -217,7 +232,16 @@ export function KahootGame({
           </div>
           <button
             type="button"
-            onClick={onCreateQuiz}
+            onClick={() =>
+              onCreateQuiz(
+                filterSubject !== 'all' || filterGrade !== 'all'
+                  ? {
+                      subjectId: filterSubject === 'all' ? 'math' : filterSubject,
+                      gradeId: filterGrade === 'all' ? 'grade_7' : filterGrade,
+                    }
+                  : undefined
+              )
+            }
             className="min-h-[42px] px-4 py-2 rounded-xl bg-[#3B82F6] hover:bg-blue-600 text-white text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer whitespace-nowrap self-start"
           >
             <Plus className="w-4 h-4" />
@@ -225,10 +249,59 @@ export function KahootGame({
           </button>
         </div>
 
+        {/* Subject & Grade Level Filters */}
+        <div className="flex flex-wrap items-center gap-2">
+          <select
+            aria-label={t.quizSubjectLabel}
+            value={filterSubject}
+            onChange={(e) => {
+              setFilterSubject(e.target.value as 'all' | SubjectId);
+              setFilterGrade('all');
+            }}
+            className="min-h-[38px] px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-semibold text-slate-800 dark:text-slate-100"
+          >
+            <option value="all">{t.allSubjectsLabel}</option>
+            {SUBJECT_CATALOG.map((subj) => (
+              <option key={subj.id} value={subj.id}>
+                {settings.language === 'km' ? subj.labelKm : subj.labelEn}
+              </option>
+            ))}
+          </select>
+
+          <select
+            aria-label={t.quizGradeLabel}
+            value={filterGrade}
+            onChange={(e) => setFilterGrade(e.target.value as 'all' | GradeId)}
+            className="min-h-[38px] px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-semibold text-slate-800 dark:text-slate-100"
+          >
+            <option value="all">{t.allGradesLabel}</option>
+            {GRADE_GROUPS.map((grp) => (
+              <optgroup
+                key={grp.id}
+                label={settings.language === 'km' ? grp.labelKm : grp.labelEn}
+              >
+                {GRADE_LEVELS.filter((g) => g.group === grp.id).map((g) => (
+                  <option key={g.id} value={g.id}>
+                    {settings.language === 'km' ? g.labelKm : g.labelEn}
+                  </option>
+                ))}
+              </optgroup>
+            ))}
+          </select>
+        </div>
+
         {/* Quiz Picker */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-          {quizzes.map((quiz) => {
+          {quizzes
+            .filter((quiz) => {
+              if (filterSubject !== 'all' && resolveQuizSubjectId(quiz) !== filterSubject) return false;
+              if (filterGrade !== 'all' && resolveQuizGradeId(quiz) !== filterGrade) return false;
+              return true;
+            })
+            .map((quiz) => {
             const selected = activeQuiz?.id === quiz.id;
+            const sid = resolveQuizSubjectId(quiz);
+            const gid = resolveQuizGradeId(quiz);
             return (
               <div
                 key={quiz.id}
@@ -246,7 +319,7 @@ export function KahootGame({
               >
                 <div>
                   <p className="text-xs text-slate-500 dark:text-slate-400 tabular-nums">
-                    {quiz.subject} · {t.questionsCount(quiz.questions.length)}
+                    {getSubjectLabel(sid, settings.language)} · {getGradeLabel(gid, settings.language, true)} · {t.questionsCount(quiz.questions.length)}
                   </p>
                   <h3 className="mt-1 font-display text-sm font-bold text-slate-900 dark:text-white">
                     {quiz.title}
@@ -461,7 +534,7 @@ export function KahootGame({
       {currentQuestion && (
         <div className="p-6 sm:p-8 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 space-y-6">
           <h3 className="font-display text-xl sm:text-2xl font-bold text-slate-900 dark:text-white text-center">
-            {currentQuestion.prompt}
+            <MathText text={currentQuestion.prompt} />
           </h3>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
@@ -494,7 +567,9 @@ export function KahootGame({
                     <span className="w-9 h-9 rounded-xl bg-black/20 flex items-center justify-center shrink-0">
                       <ShapeIcon className="w-4 h-4 fill-current" />
                     </span>
-                    <span className="text-left break-words">{opt}</span>
+                    <span className="text-left break-words">
+                      <MathText text={opt} />
+                    </span>
                   </div>
                   {isReveal && isCorrect && <CheckCircle2 className="w-5 h-5 shrink-0" />}
                   {isReveal && isChosen && !isCorrect && <XCircle className="w-5 h-5 shrink-0" />}

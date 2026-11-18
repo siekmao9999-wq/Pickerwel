@@ -562,3 +562,355 @@ export async function deleteCloudSpinResult(uid: string, resultId: string): Prom
     handleFirestoreError(error, OperationType.DELETE, path);
   }
 }
+
+/* ============================================================================
+ * EMAIL-LESS PASSCODE REGISTRATION & ADMIN PASSCODE MANAGEMENT
+ * ========================================================================== */
+
+export interface AdminPasscode {
+  code: string;
+  label: string;
+  active: boolean;
+  createdBy: string;
+  createdAtMs: number;
+  updatedAtMs: number;
+}
+
+export interface PasscodeMember {
+  id: string;
+  displayName: string;
+  passcode: string;
+  status: 'approved' | 'rejected';
+  createdAtMs: number;
+  updatedAtMs: number;
+}
+
+const VALID_PASSCODE_REGEX = /^[A-Z0-9_-]{4,32}$/;
+
+export function normalizePasscode(raw: string): string {
+  return raw.trim().toUpperCase().replace(/[^A-Z0-9_-]/g, '').slice(0, 32);
+}
+
+export function isValidPasscodeFormat(raw: string): boolean {
+  const normalized = raw.trim().toUpperCase();
+  return VALID_PASSCODE_REGEX.test(normalized);
+}
+
+export function generateRandomPasscode(prefix = 'PW'): string {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let suffix = '';
+  for (let i = 0; i < 4; i++) {
+    suffix += chars[Math.floor(Math.random() * chars.length)];
+  }
+  return `${prefix}${suffix}`;
+}
+
+function generateMemberId(): string {
+  const rand =
+    typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID().replace(/-/g, '').slice(0, 16)
+      : `${Math.random().toString(36).slice(2, 10)}${Math.random().toString(36).slice(2, 10)}`;
+  return `pm_${Date.now()}_${rand}`.slice(0, 64);
+}
+
+export async function createAdminPasscode(
+  adminUid: string,
+  rawCode: string,
+  label: string
+): Promise<AdminPasscode> {
+  const code = normalizePasscode(rawCode);
+  if (!VALID_PASSCODE_REGEX.test(code)) {
+    throw new Error('INVALID_PASSCODE_FORMAT');
+  }
+  const safeLabel = label.trim().slice(0, 80);
+  const path = `passcodes/${code}`;
+  const ref = doc(db, 'passcodes', code);
+  try {
+    const existing = await getDoc(ref);
+    if (existing.exists()) {
+      throw new Error('PASSCODE_EXISTS');
+    }
+    await setDoc(ref, {
+      code,
+      label: safeLabel,
+      active: true,
+      createdBy: sanitizeId(adminUid),
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+    const now = Date.now();
+    return {
+      code,
+      label: safeLabel,
+      active: true,
+      createdBy: sanitizeId(adminUid),
+      createdAtMs: now,
+      updatedAtMs: now,
+    };
+  } catch (error) {
+    if (
+      error instanceof Error &&
+      (error.message === 'PASSCODE_EXISTS' || error.message === 'INVALID_PASSCODE_FORMAT')
+    ) {
+      throw error;
+    }
+    handleFirestoreError(error, OperationType.CREATE, path);
+  }
+}
+
+export async function toggleAdminPasscodeActive(
+  code: string,
+  active: boolean
+): Promise<void> {
+  const safeCode = normalizePasscode(code);
+  const path = `passcodes/${safeCode}`;
+  try {
+    await updateDoc(doc(db, 'passcodes', safeCode), {
+      active,
+      updatedAt: serverTimestamp(),
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, path);
+  }
+}
+
+export async function deleteAdminPasscode(code: string): Promise<void> {
+  const safeCode = normalizePasscode(code);
+  const path = `passcodes/${safeCode}`;
+  try {
+    await deleteDoc(doc(db, 'passcodes', safeCode));
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, path);
+  }
+}
+
+export function subscribeAdminPasscodes(
+  onData: (passcodes: AdminPasscode[]) => void
+): Unsubscribe {
+  const path = 'passcodes';
+  const q = query(collection(db, 'passcodes'), orderBy('createdAt', 'desc'));
+  return onSnapshot(
+    q,
+    (snapshot) => {
+      const list: AdminPasscode[] = snapshot.docs.map((d) => {
+        const data = d.data();
+        return {
+          code: String(data.code || d.id),
+          label: String(data.label || ''),
+          active: Boolean(data.active),
+          createdBy: String(data.createdBy || ''),
+          createdAtMs: toMillis(data.createdAt),
+          updatedAtMs: toMillis(data.updatedAt),
+        };
+      });
+      onData(list);
+    },
+    (error) => {
+      handleFirestoreError(error, OperationType.LIST, path);
+    }
+  );
+}
+
+export async function registerMemberWithPasscode(
+  rawName: string,
+  rawPasscode: string
+): Promise<PasscodeMember> {
+  const displayName = rawName.trim().slice(0, 80);
+  if (!displayName) {
+    throw new Error('NAME_REQUIRED');
+  }
+
+  const normalized = rawPasscode.trim().toUpperCase();
+  if (!VALID_PASSCODE_REGEX.test(normalized)) {
+    throw new Error('PASSCODE_INVALID');
+  }
+
+  const passcodePath = `passcodes/${normalized}`;
+  let passcodeSnap;
+  try {
+    passcodeSnap = await getDoc(doc(db, 'passcodes', normalized));
+  } catch (error) {
+    handleFirestoreError(error, OperationType.GET, passcodePath);
+  }
+
+  if (!passcodeSnap.exists()) {
+    throw new Error('PASSCODE_INVALID');
+  }
+
+  const passcodeData = passcodeSnap.data();
+  if (passcodeData.active !== true) {
+    throw new Error('PASSCODE_DISABLED');
+  }
+
+  const memberId = generateMemberId();
+  const memberPath = `passcodeMembers/${memberId}`;
+  try {
+    await setDoc(doc(db, 'passcodeMembers', memberId), {
+      id: memberId,
+      displayName,
+      passcode: normalized,
+      status: 'approved',
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+    const now = Date.now();
+    return {
+      id: memberId,
+      displayName,
+      passcode: normalized,
+      status: 'approved',
+      createdAtMs: now,
+      updatedAtMs: now,
+    };
+  } catch (error) {
+    handleFirestoreError(error, OperationType.CREATE, memberPath);
+  }
+}
+
+export function subscribePasscodeMemberStatus(
+  memberId: string,
+  passcode: string,
+  onUpdate: (state: { status: 'approved' | 'rejected'; passcodeActive: boolean }) => void
+): Unsubscribe {
+  const safeId = sanitizeId(memberId);
+  const safeCode = normalizePasscode(passcode);
+
+  let latestMemberStatus: 'approved' | 'rejected' = 'approved';
+  let latestPasscodeActive = true;
+
+  const emit = () => {
+    onUpdate({ status: latestMemberStatus, passcodeActive: latestPasscodeActive });
+  };
+
+  const unsubMember = onSnapshot(
+    doc(db, 'passcodeMembers', safeId),
+    (snap) => {
+      if (!snap.exists()) {
+        if (!snap.metadata.fromCache) {
+          latestMemberStatus = 'rejected';
+        }
+      } else {
+        latestMemberStatus = snap.data().status === 'rejected' ? 'rejected' : 'approved';
+      }
+      emit();
+    },
+    (error) => {
+      handleFirestoreError(error, OperationType.GET, `passcodeMembers/${safeId}`);
+    }
+  );
+
+  const unsubCode = onSnapshot(
+    doc(db, 'passcodes', safeCode),
+    (snap) => {
+      if (!snap.exists()) {
+        if (!snap.metadata.fromCache) {
+          latestPasscodeActive = false;
+        }
+      } else {
+        latestPasscodeActive = snap.data().active === true;
+      }
+      emit();
+    },
+    (error) => {
+      handleFirestoreError(error, OperationType.GET, `passcodes/${safeCode}`);
+    }
+  );
+
+  return () => {
+    unsubMember();
+    unsubCode();
+  };
+}
+
+export function subscribeAllPasscodeMembers(
+  onData: (members: PasscodeMember[]) => void
+): Unsubscribe {
+  const path = 'passcodeMembers';
+  const q = query(collection(db, 'passcodeMembers'), orderBy('createdAt', 'desc'));
+  return onSnapshot(
+    q,
+    (snapshot) => {
+      const list: PasscodeMember[] = snapshot.docs.map((d) => {
+        const data = d.data();
+        return {
+          id: String(data.id || d.id),
+          displayName: String(data.displayName || 'Pickerwel User'),
+          passcode: String(data.passcode || ''),
+          status: data.status === 'rejected' ? 'rejected' : 'approved',
+          createdAtMs: toMillis(data.createdAt),
+          updatedAtMs: toMillis(data.updatedAt),
+        };
+      });
+      onData(list);
+    },
+    (error) => {
+      handleFirestoreError(error, OperationType.LIST, path);
+    }
+  );
+}
+
+export async function updatePasscodeMemberStatus(
+  memberId: string,
+  status: 'approved' | 'rejected'
+): Promise<void> {
+  const safeId = sanitizeId(memberId);
+  const path = `passcodeMembers/${safeId}`;
+  try {
+    await updateDoc(doc(db, 'passcodeMembers', safeId), {
+      status,
+      updatedAt: serverTimestamp(),
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, path);
+  }
+}
+
+export async function deletePasscodeMember(memberId: string): Promise<void> {
+  const safeId = sanitizeId(memberId);
+  const path = `passcodeMembers/${safeId}`;
+  try {
+    await deleteDoc(doc(db, 'passcodeMembers', safeId));
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, path);
+  }
+}
+
+export const DEFAULT_ADMIN_DISPLAY_NAME = 'Siek Mao';
+
+export function subscribePublicAppConfig(
+  onUpdate: (adminName: string) => void
+): Unsubscribe {
+  const path = 'appConfig/public';
+  return onSnapshot(
+    doc(db, 'appConfig', 'public'),
+    (snap) => {
+      if (snap.exists()) {
+        const name = String(snap.data().adminName || '').trim().slice(0, 80);
+        if (name) {
+          onUpdate(name);
+          return;
+        }
+      }
+      onUpdate(DEFAULT_ADMIN_DISPLAY_NAME);
+    },
+    (error) => {
+      handleFirestoreError(error, OperationType.GET, path);
+    }
+  );
+}
+
+export async function updatePublicAdminName(rawName: string): Promise<string> {
+  const adminName = rawName.trim().slice(0, 80) || DEFAULT_ADMIN_DISPLAY_NAME;
+  const path = 'appConfig/public';
+  try {
+    await setDoc(doc(db, 'appConfig', 'public'), {
+      adminName,
+      updatedAt: serverTimestamp(),
+    });
+    return adminName;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, path);
+  }
+}
+
+

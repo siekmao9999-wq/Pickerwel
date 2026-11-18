@@ -10,6 +10,7 @@ interface ApprovalGateBannerProps {
   email: string;
   language: Language;
   onSignOut: () => void;
+  customDesc?: string;
 }
 
 export function ApprovalGateBanner({
@@ -17,6 +18,7 @@ export function ApprovalGateBanner({
   email,
   language,
   onSignOut,
+  customDesc,
 }: ApprovalGateBannerProps) {
   const t = COPY[language];
   if (status === 'approved') return null;
@@ -42,7 +44,7 @@ export function ApprovalGateBanner({
             {isRejected ? t.rejectedTitle : t.pendingApprovalTitle}
           </h2>
           <p className="mt-1 text-sm text-slate-600 dark:text-slate-300 leading-relaxed">
-            {isRejected ? t.rejectedDesc : t.pendingApprovalDesc}
+            {customDesc || (isRejected ? t.rejectedDesc : t.pendingApprovalDesc)}
           </p>
           {email && (
             <p className="mt-1.5 text-xs text-slate-500 dark:text-slate-400 truncate">

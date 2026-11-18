@@ -4,7 +4,7 @@ import { flatRecommended as firebaseRulesRecommended } from "@firebase/eslint-pl
 
 export default defineConfig([
   {
-    ignores: [".next/**/*", "node_modules/**/*", "dist/**/*"],
+    ignores: [".next/**/*", "node_modules/**/*", "dist/**/*", "public/**/*.mjs"],
   },
   ...next,
   firebaseRulesRecommended,

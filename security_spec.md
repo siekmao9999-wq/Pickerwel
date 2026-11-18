@@ -24,3 +24,9 @@
 10. **Entries Array Exhaustion**: Creating a wheel with 201 entries -> `PERMISSION_DENIED`.
 11. **Client Timestamp Forgery**: Creating a wheel with a backdated `createdAt` -> `PERMISSION_DENIED`.
 12. **Self-Adding to /admins**: Non-admin creating `/admins/u1` -> `PERMISSION_DENIED`.
+13. **Passcode Bypass / Inactive Passcode Registration**: Creating `/passcodeMembers/pm_...` using a nonexistent or `active: false` passcode -> `PERMISSION_DENIED`.
+14. **Passcode Enumeration**: Non-admin calling `list` on `/passcodes` or `/passcodeMembers` -> `PERMISSION_DENIED`.
+15. **Non-Admin Passcode Minting**: Non-admin creating or modifying `/passcodes/{codeId}` -> `PERMISSION_DENIED`.
+16. **Unauthorized App Config Write**: Non-admin modifying `/appConfig/public` -> `PERMISSION_DENIED`.
+
+

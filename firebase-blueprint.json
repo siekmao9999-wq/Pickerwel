@@ -249,6 +249,123 @@
         "removedAfterSpin",
         "spunAt"
       ]
+    },
+    "Passcode": {
+      "title": "Passcode",
+      "description": "Admin-issued registration passcode allowing users to sign in with only a display name and no email.",
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "string",
+          "minLength": 4,
+          "maxLength": 32,
+          "pattern": "^[A-Z0-9_\\-]+$",
+          "description": "Uppercase alphanumeric passcode identifier issued by an administrator."
+        },
+        "label": {
+          "type": "string",
+          "maxLength": 80,
+          "description": "Optional classroom or group note for the admin."
+        },
+        "active": {
+          "type": "boolean",
+          "description": "Whether this passcode currently accepts registrations."
+        },
+        "createdBy": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "UID of the administrator who created this passcode."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server creation timestamp."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server last update timestamp."
+        }
+      },
+      "required": [
+        "code",
+        "label",
+        "active",
+        "createdBy",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "PasscodeMember": {
+      "title": "PasscodeMember",
+      "description": "Email-less user registration created using a display name and an active Admin passcode.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 16,
+          "maxLength": 128,
+          "pattern": "^pm_[a-zA-Z0-9_\\-]+$",
+          "description": "Unique member session identifier."
+        },
+        "displayName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80,
+          "description": "Normal display name provided at registration (no email required)."
+        },
+        "passcode": {
+          "type": "string",
+          "minLength": 4,
+          "maxLength": 32,
+          "pattern": "^[A-Z0-9_\\-]+$",
+          "description": "Admin passcode used to register."
+        },
+        "status": {
+          "type": "string",
+          "enum": ["approved", "rejected"],
+          "description": "Access status controllable by an administrator."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server creation timestamp."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server last update timestamp."
+        }
+      },
+      "required": [
+        "id",
+        "displayName",
+        "passcode",
+        "status",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "PublicAppConfig": {
+      "title": "PublicAppConfig",
+      "description": "Public non-PII app display configuration managed by Administrators (e.g. Admin display name shown on the app).",
+      "type": "object",
+      "properties": {
+        "adminName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80,
+          "description": "Administrator display name shown on the application UI."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of the last update."
+        }
+      },
+      "required": ["adminName", "updatedAt"]
     }
   },
   "firestore": {
@@ -259,6 +376,18 @@
     "/admins/{adminUid}": {
       "schema": { "$ref": "#/entities/AdminMember" },
       "description": "Stores additional admin UIDs approved by the bootstrapped administrator."
+    },
+    "/passcodes/{codeId}": {
+      "schema": { "$ref": "#/entities/Passcode" },
+      "description": "Stores Admin-issued passcodes for email-less user registration."
+    },
+    "/passcodeMembers/{memberId}": {
+      "schema": { "$ref": "#/entities/PasscodeMember" },
+      "description": "Stores email-less user registrations verified against active Admin passcodes."
+    },
+    "/appConfig/{docId}": {
+      "schema": { "$ref": "#/entities/PublicAppConfig" },
+      "description": "Stores public non-PII application settings such as the Admin display name."
     },
     "/users/{userId}/wheels/{wheelId}": {
       "schema": { "$ref": "#/entities/Wheel" },

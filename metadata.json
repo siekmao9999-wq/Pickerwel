@@ -1,6 +1,6 @@
 {
   "name": "Pickerwel",
   "description": "កម្មវិធីបង្វិលកងស្វែងរកជម្រើសដ៏ទំនើប និងងាយស្រួលប្រើសម្រាប់ថ្នាក់រៀន និងការងារក្រុម។",
-  "requestFramePermissions": [],
+  "requestFramePermissions": ["camera"],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

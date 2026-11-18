@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useRef, useState, useEffect, useCallback } from 'react';
-import { Volume2, VolumeX, Sparkles, Wind, Music, Disc3 } from 'lucide-react';
+import { Volume2, VolumeX, Sparkles, Wind, Music, Disc3, Waves, Timer } from 'lucide-react';
 import { getSegmentColors, getContrastTextColor, type PaletteId } from '@/lib/palettes';
 import {
   SPIN_SOUND_OPTIONS,
@@ -24,6 +24,8 @@ interface PickerWheelCanvasProps {
   entries: string[];
   paletteId: PaletteId;
   spinDuration: number;
+  showSpinCountdown?: boolean;
+  onSpinStateChange?: (spinning: boolean) => void;
   soundEnabled: boolean;
   spinSound?: SpinSoundId;
   onChangeSpinSound?: (sound: SpinSoundId) => void;
@@ -55,6 +57,8 @@ export function PickerWheelCanvas({
   entries,
   paletteId,
   spinDuration,
+  showSpinCountdown = false,
+  onSpinStateChange,
   soundEnabled,
   spinSound,
   onChangeSpinSound,
@@ -72,6 +76,8 @@ export function PickerWheelCanvas({
   const [isSpinning, setIsSpinning] = useState(false);
   const [clapperTilt, setClapperTilt] = useState(0);
   const [internalSpinSound, setInternalSpinSound] = useState<SpinSoundId>('classic-tick');
+  const [countdownTenths, setCountdownTenths] = useState<number | null>(null);
+  const [activeSpinDurationMs, setActiveSpinDurationMs] = useState<number>(spinDuration * 1000);
 
   const activeSpinSound: SpinSoundId = spinSound ?? internalSpinSound;
   const t = COPY[language];
@@ -120,14 +126,29 @@ export function PickerWheelCanvas({
 
       isSpinningRef.current = true;
       setIsSpinning(true);
+      onSpinStateChange?.(true);
       onHoverSlice(null);
 
-      const durationMs = Math.min(10, Math.max(3, spinDuration)) * 1000;
+      const minSec = showSpinCountdown ? 1 : 3;
+      const maxSec = showSpinCountdown ? 120 : 10;
+      const clampedSec = Math.min(maxSec, Math.max(minSec, spinDuration));
+      const durationMs = clampedSec * 1000;
+      setActiveSpinDurationMs(durationMs);
+
+      const initialTenths = Math.ceil(durationMs / 100);
+      let lastTenths = initialTenths;
+      setCountdownTenths(initialTenths);
+
       const startRotation = rotationRef.current;
-      const baseTurns = 5 + Math.floor(Math.random() * 4) + Math.min(4, Math.floor(extraVelocityBoost));
+      const baseTurns =
+        clampedSec > 10
+          ? Math.max(6, Math.round(clampedSec * 0.65) + Math.floor(Math.random() * 3)) +
+            Math.min(4, Math.floor(extraVelocityBoost))
+          : 5 + Math.floor(Math.random() * 4) + Math.min(4, Math.floor(extraVelocityBoost));
       const randomOffset = Math.random() * 360;
       const totalDelta = directionSign * (baseTurns * 360 + randomOffset);
-      const targetRotation = startRotation + totalDelta;
+      const easePower = clampedSec > 10 ? 2.6 : 4.2;
+      const ambientPower = clampedSec > 10 ? 2.0 : 3.2;
 
       const startTime = performance.now();
       let lastPegBucket = Math.floor(startRotation / sliceAngle);
@@ -142,16 +163,23 @@ export function PickerWheelCanvas({
 
       const step = (now: number) => {
         const elapsed = now - startTime;
+        const remaining = Math.max(0, durationMs - elapsed);
         const progress = Math.min(elapsed / durationMs, 1);
-        // Smooth physical deceleration (quintic ease-out)
-        const eased = 1 - Math.pow(1 - progress, 4.2);
+        // Smooth physical deceleration
+        const eased = 1 - Math.pow(1 - progress, easePower);
         const currentRotation = startRotation + totalDelta * eased;
 
         rotationRef.current = currentRotation;
         setRotation(currentRotation);
 
+        const nextTenths = Math.ceil(remaining / 100);
+        if (nextTenths !== lastTenths) {
+          lastTenths = nextTenths;
+          setCountdownTenths(nextTenths);
+        }
+
         if (soundEnabled && ambientControllerRef.current) {
-          const speedRatio = Math.pow(1 - progress, 3.2);
+          const speedRatio = Math.pow(1 - progress, ambientPower);
           ambientControllerRef.current.update(speedRatio);
         }
 
@@ -179,7 +207,9 @@ export function PickerWheelCanvas({
           }
           isSpinningRef.current = false;
           setIsSpinning(false);
+          setCountdownTenths(null);
           setClapperTilt(0);
+          onSpinStateChange?.(false);
 
           const normalized = ((currentRotation % 360) + 360) % 360;
           const pointerLocalAngle = (360 - normalized) % 360;
@@ -204,6 +234,8 @@ export function PickerWheelCanvas({
       hapticsEnabled,
       onHoverSlice,
       onSpinComplete,
+      onSpinStateChange,
+      showSpinCountdown,
       sliceAngle,
       soundEnabled,
       spinDuration,
@@ -305,8 +337,73 @@ export function PickerWheelCanvas({
     count <= 8 ? 16 : count <= 14 ? 13.5 : count <= 24 ? 11 : count <= 40 ? 8.5 : 6.5;
   const maxLabelChars = count <= 8 ? 18 : count <= 16 ? 15 : count <= 30 ? 12 : 9;
 
+  const armedSeconds = Math.min(120, Math.max(1, Math.round(spinDuration)));
+  const remainingSecFloat =
+    countdownTenths !== null ? countdownTenths / 10 : armedSeconds;
+  const totalSecFloat = Math.max(1, activeSpinDurationMs / 1000);
+  const remainingRatio =
+    isSpinning && countdownTenths !== null
+      ? Math.max(0, Math.min(1, remainingSecFloat / totalSecFloat))
+      : 1;
+  const isFinalMoment = isSpinning && remainingSecFloat <= 2.0;
+
   return (
     <div className="relative flex flex-col items-center justify-center w-full select-none">
+      {/* Optional Time to Spin Live Countdown HUD */}
+      {showSpinCountdown && (
+        <div
+          aria-live="polite"
+          className={`mb-3 w-full max-w-[340px] rounded-xl border px-3.5 py-2 transition-colors ${
+            isSpinning
+              ? isFinalMoment
+                ? 'bg-amber-50/95 dark:bg-amber-950/40 border-amber-300 dark:border-amber-700'
+                : 'bg-blue-50/90 dark:bg-blue-950/40 border-blue-200 dark:border-blue-800'
+              : 'bg-white/90 dark:bg-slate-900/90 border-slate-200 dark:border-slate-800'
+          }`}
+        >
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2 min-w-0">
+              <Timer
+                className={`w-4 h-4 shrink-0 ${
+                  isSpinning
+                    ? isFinalMoment
+                      ? 'text-amber-600 dark:text-amber-400 animate-pulse'
+                      : 'text-[#3B82F6] dark:text-blue-400 animate-spin'
+                    : 'text-[#3B82F6] dark:text-blue-400'
+                }`}
+              />
+              <span className="text-xs font-semibold text-slate-700 dark:text-slate-200 truncate">
+                {isSpinning ? t.timeToSpinRemaining : t.timeToSpinArmed(armedSeconds)}
+              </span>
+            </div>
+            <span
+              className={`font-mono text-base font-bold tabular-nums tracking-tight shrink-0 ${
+                isSpinning
+                  ? isFinalMoment
+                    ? 'text-amber-600 dark:text-amber-400'
+                    : 'text-[#3B82F6] dark:text-blue-400'
+                  : 'text-slate-900 dark:text-white'
+              }`}
+            >
+              {remainingSecFloat.toFixed(1)}
+              {t.timeToSpinSecUnit}
+            </span>
+          </div>
+          <div className="mt-1.5 h-1.5 w-full rounded-full bg-slate-200/80 dark:bg-slate-800 overflow-hidden">
+            <div
+              className={`h-full rounded-full transition-[width] duration-100 ease-linear ${
+                isSpinning
+                  ? isFinalMoment
+                    ? 'bg-amber-500'
+                    : 'bg-[#3B82F6]'
+                  : 'bg-slate-400/60 dark:bg-slate-600'
+              }`}
+              style={{ width: `${Math.round(remainingRatio * 100)}%` }}
+            />
+          </div>
+        </div>
+      )}
+
       {/* Glowing radial aura behind wheel (especially luminous in Dark Mode & while spinning) */}
       <div
         className={`pointer-events-none absolute inset-4 rounded-full blur-3xl transition-opacity duration-500 ${
@@ -317,7 +414,7 @@ export function PickerWheelCanvas({
         aria-hidden="true"
       />
 
-      <div className="relative w-full max-w-[460px] xl:max-w-[520px] aspect-square flex items-center justify-center">
+      <div className="relative w-full max-w-[min(86vw,48dvh,380px)] sm:max-w-[min(76vw,52dvh,420px)] md:max-w-[min(42vw,56dvh,430px)] lg:max-w-[min(42vw,60dvh,480px)] xl:max-w-[min(44vw,64dvh,540px)] aspect-square flex items-center justify-center">
         {/* Top Clapper Pointer at 12 o'clock */}
         <div
           className="pointer-events-none absolute -top-2 left-1/2 -translate-x-1/2 z-20 transition-transform duration-75 origin-[50%_10px]"
@@ -497,7 +594,7 @@ export function PickerWheelCanvas({
           disabled={isSpinning || count < 2}
           onClick={() => launchSpin(1, 0)}
           aria-label={spinLabel}
-          className={`absolute z-10 w-[86px] h-[86px] sm:w-[96px] sm:h-[96px] rounded-full flex items-center justify-center font-latin font-bold tracking-wider text-white border-4 border-white dark:border-slate-900 shadow-xl transition-all duration-150 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-blue-400 ${
+          className={`absolute z-10 w-[72px] h-[72px] sm:w-[86px] sm:h-[86px] lg:w-[96px] lg:h-[96px] rounded-full flex items-center justify-center font-latin font-bold tracking-wider text-white border-4 border-white dark:border-slate-900 shadow-xl transition-all duration-150 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-blue-400 ${
             count < 2
               ? 'bg-slate-400 dark:bg-slate-600 cursor-not-allowed opacity-80'
               : isSpinning
@@ -505,13 +602,13 @@ export function PickerWheelCanvas({
               : 'bg-gradient-to-br from-[#3B82F6] to-[#4F46E5] hover:scale-105 active:scale-95 cursor-pointer shadow-blue-500/35'
           }`}
         >
-          <span className="text-base sm:text-lg">{spinLabel}</span>
+          <span className="text-sm sm:text-base lg:text-lg">{spinLabel}</span>
         </button>
       </div>
 
       {/* Inline Spin Sound Selector */}
       <div
-        className="mt-3 w-full max-w-xl flex flex-wrap items-center justify-center gap-1.5"
+        className="mt-2.5 sm:mt-3 w-full max-w-xl flex flex-wrap items-center justify-center gap-1.5 px-1"
         role="group"
         aria-label={t.spinSoundLabel}
       >
@@ -530,6 +627,8 @@ export function PickerWheelCanvas({
               ? Music
               : opt.id === 'breeze-whoosh'
               ? Wind
+              : opt.id === 'cosmic-glide'
+              ? Waves
               : opt.id === 'casino-click'
               ? Sparkles
               : Disc3;

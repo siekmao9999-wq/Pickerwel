@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { Play, Pause, RotateCcw, Maximize2, Watch } from 'lucide-react';
-import { formatStopwatchMs } from './StopwatchView';
+import { formatStopwatchMs } from '@/lib/time-format';
 import { COPY, type Language } from '@/lib/i18n';
 import { playTickSound } from '@/lib/sound';
 

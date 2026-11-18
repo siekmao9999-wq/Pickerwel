@@ -1,20 +1,21 @@
 'use client';
 
-import React from 'react';
-import { Sun, Moon, Volume2, PartyPopper, Smartphone, Languages, Timer, Wifi, Music, Wind, Sparkles, Disc3 } from 'lucide-react';
+import React, { useState } from 'react';
+import { Sun, Moon, Volume2, PartyPopper, Smartphone, Languages, Timer, Wifi, Music, Wind, Sparkles, Disc3, Waves } from 'lucide-react';
 import { usePickerwel } from './PickerwelProvider';
 import { PWAInstallButton } from './PWAInstallButton';
 import { WHEEL_PALETTES, type PaletteId } from '@/lib/palettes';
-import { SPIN_SOUND_OPTIONS, previewSpinSound } from '@/lib/sound';
+import { SPIN_SOUND_OPTIONS, previewSpinSound, type SpinSoundId } from '@/lib/sound';
 import { COPY } from '@/lib/i18n';
 
 export function SettingsView() {
   const { settings, updateSettings, activeWheel, updateActiveWheel } = usePickerwel();
+  const [previewingId, setPreviewingId] = useState<SpinSoundId | null>(null);
   const t = COPY[settings.language];
   const isKm = settings.language === 'km';
 
   return (
-    <div className="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8 pb-24 lg:pb-8">
+    <div className="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8 pb-[calc(6rem+env(safe-area-inset-bottom))] md:pb-8">
       <div className="max-w-3xl mx-auto space-y-6">
         <div className="pb-5 border-b border-slate-200 dark:border-slate-800">
           <h1 className="font-display text-2xl sm:text-3xl font-bold text-slate-900 dark:text-white">
@@ -174,11 +175,14 @@ export function SettingsView() {
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
               {SPIN_SOUND_OPTIONS.map((opt) => {
                 const active = settings.spinSound === opt.id;
+                const isPreviewing = previewingId === opt.id;
                 const Icon =
                   opt.id === 'chime-bell'
                     ? Music
                     : opt.id === 'breeze-whoosh'
                     ? Wind
+                    : opt.id === 'cosmic-glide'
+                    ? Waves
                     : opt.id === 'casino-click'
                     ? Sparkles
                     : Disc3;
@@ -189,16 +193,25 @@ export function SettingsView() {
                     onClick={() => {
                       updateSettings({ spinSound: opt.id, soundEnabled: true });
                       previewSpinSound(opt.id);
+                      setPreviewingId(opt.id);
+                      setTimeout(() => {
+                        setPreviewingId((curr) => (curr === opt.id ? null : curr));
+                      }, 460);
                     }}
                     aria-pressed={active}
-                    className={`min-h-[42px] px-3 py-2 rounded-xl border text-xs font-medium flex items-center gap-2 transition-colors cursor-pointer ${
+                    className={`min-h-[42px] px-3 py-2 rounded-xl border text-xs font-medium flex items-center justify-between gap-2 transition-colors cursor-pointer ${
                       active
                         ? 'border-blue-500 bg-blue-50/80 dark:bg-blue-950/40 text-[#3B82F6] dark:text-blue-400'
                         : 'border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800'
                     }`}
                   >
-                    <Icon className="w-4 h-4 shrink-0" />
-                    <span className="truncate">{isKm ? opt.nameKm : opt.nameEn}</span>
+                    <span className="flex items-center gap-2 min-w-0">
+                      <Icon className={`w-4 h-4 shrink-0 ${isPreviewing ? 'animate-pulse' : ''}`} />
+                      <span className="truncate">{isKm ? opt.nameKm : opt.nameEn}</span>
+                    </span>
+                    {isPreviewing && (
+                      <Volume2 className="w-3.5 h-3.5 shrink-0 animate-pulse" />
+                    )}
                   </button>
                 );
               })}

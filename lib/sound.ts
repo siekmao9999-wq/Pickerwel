@@ -3,7 +3,8 @@ export type SpinSoundId =
   | 'wood-clack'
   | 'casino-click'
   | 'chime-bell'
-  | 'breeze-whoosh';
+  | 'breeze-whoosh'
+  | 'cosmic-glide';
 
 export interface SpinSoundOption {
   id: SpinSoundId;
@@ -17,6 +18,7 @@ export const SPIN_SOUND_OPTIONS: SpinSoundOption[] = [
   { id: 'casino-click', nameKm: 'មេកានិចច្បាស់', nameEn: 'Crisp Click' },
   { id: 'chime-bell', nameKm: 'កណ្តឹងតន្ត្រី', nameEn: 'Sparkle Chime' },
   { id: 'breeze-whoosh', nameKm: 'ខ្យល់បក់វិល', nameEn: 'Breeze Spin' },
+  { id: 'cosmic-glide', nameKm: 'រលកអវកាស', nameEn: 'Cosmic Glide' },
 ];
 
 export const VALID_SPIN_SOUNDS = new Set<SpinSoundId>(
@@ -158,13 +160,33 @@ export function playSpinStepSound(
       osc.frequency.setValueAtTime(360, now);
       osc.frequency.exponentialRampToValueAtTime(135, now + 0.024);
 
-      gain.gain.setValueAtTime(volume * 0.36, now);
+      gain.gain.setValueAtTime(volume * 0.34, now);
       gain.gain.exponentialRampToValueAtTime(0.001, now + 0.028);
 
       osc.connect(gain);
       gain.connect(ctx.destination);
       osc.start(now);
       osc.stop(now + 0.032);
+      return;
+    }
+
+    if (soundId === 'cosmic-glide') {
+      // Soft harmonic pulse synchronized with slice crossings over the synth pad
+      const padNotes = [392.0, 440.0, 493.88, 587.33, 659.25, 783.99];
+      const freq = padNotes[Math.abs(stepIndex) % padNotes.length];
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(freq, now);
+
+      gain.gain.setValueAtTime(0.001, now);
+      gain.gain.linearRampToValueAtTime(volume * 0.32, now + 0.015);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.16);
+
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(now);
+      osc.stop(now + 0.17);
       return;
     }
 
@@ -194,10 +216,23 @@ export function playTickSound(volume = 0.25): void {
 }
 
 export function previewSpinSound(soundId: SpinSoundId): void {
+  const ambient = startSpinAmbient(soundId);
+  ambient.update(0.85);
   playSpinStepSound(soundId, 0.24, 0);
   if (typeof window !== 'undefined') {
-    window.setTimeout(() => playSpinStepSound(soundId, 0.2, 2), 95);
-    window.setTimeout(() => playSpinStepSound(soundId, 0.16, 4), 195);
+    window.setTimeout(() => {
+      ambient.update(0.6);
+      playSpinStepSound(soundId, 0.2, 2);
+    }, 110);
+    window.setTimeout(() => {
+      ambient.update(0.35);
+      playSpinStepSound(soundId, 0.16, 4);
+    }, 240);
+    window.setTimeout(() => {
+      ambient.stop();
+    }, 420);
+  } else {
+    ambient.stop();
   }
 }
 
@@ -211,32 +246,69 @@ export function startSpinAmbient(soundId: SpinSoundId): SpinAmbientController {
     const ctx = getAudioContext();
     if (!ctx) return { update: () => {}, stop: () => {} };
 
+    const now = ctx.currentTime;
     const noise = ctx.createBufferSource();
     noise.buffer = getNoiseBuffer(ctx);
     noise.loop = true;
 
     const filter = ctx.createBiquadFilter();
     filter.type = soundId === 'breeze-whoosh' ? 'bandpass' : 'lowpass';
-    filter.Q.setValueAtTime(soundId === 'breeze-whoosh' ? 1.4 : 0.8, ctx.currentTime);
+    filter.Q.setValueAtTime(soundId === 'breeze-whoosh' ? 1.5 : 0.9, now);
     filter.frequency.setValueAtTime(
-      soundId === 'breeze-whoosh' ? 760 : 420,
-      ctx.currentTime
+      soundId === 'breeze-whoosh' ? 780 : 420,
+      now
     );
 
     const gain = ctx.createGain();
     const baseGain =
       soundId === 'breeze-whoosh'
-        ? 0.14
+        ? 0.15
         : soundId === 'chime-bell'
-        ? 0.035
+        ? 0.03
+        : soundId === 'cosmic-glide'
+        ? 0.04
         : 0.045;
-    gain.gain.setValueAtTime(0.001, ctx.currentTime);
-    gain.gain.linearRampToValueAtTime(baseGain, ctx.currentTime + 0.08);
+    gain.gain.setValueAtTime(0.001, now);
+    gain.gain.linearRampToValueAtTime(baseGain, now + 0.08);
 
     noise.connect(filter);
     filter.connect(gain);
     gain.connect(ctx.destination);
-    noise.start(ctx.currentTime);
+    noise.start(now);
+
+    // Optional warm harmonic drone layer for Chime & Cosmic Glide profiles
+    let droneOscA: OscillatorNode | null = null;
+    let droneOscB: OscillatorNode | null = null;
+    let droneFilter: BiquadFilterNode | null = null;
+    let droneGain: GainNode | null = null;
+
+    if (soundId === 'cosmic-glide' || soundId === 'chime-bell') {
+      droneOscA = ctx.createOscillator();
+      droneOscB = ctx.createOscillator();
+      droneFilter = ctx.createBiquadFilter();
+      droneGain = ctx.createGain();
+
+      droneOscA.type = soundId === 'cosmic-glide' ? 'sawtooth' : 'sine';
+      droneOscB.type = 'sine';
+
+      droneOscA.frequency.setValueAtTime(soundId === 'cosmic-glide' ? 196 : 261.63, now);
+      droneOscB.frequency.setValueAtTime(soundId === 'cosmic-glide' ? 293.66 : 392.0, now);
+
+      droneFilter.type = 'lowpass';
+      droneFilter.frequency.setValueAtTime(soundId === 'cosmic-glide' ? 520 : 700, now);
+      droneFilter.Q.setValueAtTime(2.2, now);
+
+      droneGain.gain.setValueAtTime(0.001, now);
+      droneGain.gain.linearRampToValueAtTime(soundId === 'cosmic-glide' ? 0.065 : 0.032, now + 0.1);
+
+      droneOscA.connect(droneFilter);
+      droneOscB.connect(droneFilter);
+      droneFilter.connect(droneGain);
+      droneGain.connect(ctx.destination);
+
+      droneOscA.start(now);
+      droneOscB.start(now);
+    }
 
     let stopped = false;
 
@@ -247,10 +319,20 @@ export function startSpinAmbient(soundId: SpinSoundId): SpinAmbientController {
         const t = ctx.currentTime;
         const targetFreq =
           soundId === 'breeze-whoosh'
-            ? 240 + clamped * 920
+            ? 240 + clamped * 960
             : 180 + clamped * 440;
         filter.frequency.setTargetAtTime(targetFreq, t, 0.04);
         gain.gain.setTargetAtTime(Math.max(0.001, baseGain * clamped), t, 0.05);
+
+        if (droneFilter && droneGain && droneOscA && droneOscB) {
+          const baseDroneGain = soundId === 'cosmic-glide' ? 0.065 : 0.032;
+          droneFilter.frequency.setTargetAtTime(260 + clamped * 880, t, 0.05);
+          droneGain.gain.setTargetAtTime(Math.max(0.001, baseDroneGain * clamped), t, 0.06);
+          if (soundId === 'cosmic-glide') {
+            droneOscA.frequency.setTargetAtTime(165 + clamped * 66, t, 0.06);
+            droneOscB.frequency.setTargetAtTime(247 + clamped * 99, t, 0.06);
+          }
+        }
       },
       stop: () => {
         if (stopped) return;
@@ -258,7 +340,12 @@ export function startSpinAmbient(soundId: SpinSoundId): SpinAmbientController {
         try {
           const t = ctx.currentTime;
           gain.gain.setTargetAtTime(0.0001, t, 0.03);
-          noise.stop(t + 0.08);
+          noise.stop(t + 0.09);
+          if (droneGain && droneOscA && droneOscB) {
+            droneGain.gain.setTargetAtTime(0.0001, t, 0.04);
+            droneOscA.stop(t + 0.1);
+            droneOscB.stop(t + 0.1);
+          }
         } catch {
           // Ignore cleanup errors
         }
@@ -389,6 +476,97 @@ export function playWrongSound(): void {
     osc.stop(now + 0.26);
   } catch {
     // Ignore
+  }
+}
+
+export function playScanBeepSound(): void {
+  try {
+    const ctx = getAudioContext();
+    if (!ctx) return;
+    const now = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(1174.66, now); // D6 crisp scanner beep
+    osc.frequency.setValueAtTime(1567.98, now + 0.055); // G6 confirmation step
+    gain.gain.setValueAtTime(0.001, now);
+    gain.gain.linearRampToValueAtTime(0.14, now + 0.012);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.16);
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start(now);
+    osc.stop(now + 0.17);
+  } catch {
+    // Ignore audio context errors
+  }
+}
+
+export function playDuckQuackSound(): void {
+  try {
+    const ctx = getAudioContext();
+    if (!ctx) return;
+    const now = ctx.currentTime;
+    // Playful double "quack-quack" nasal formant pulse
+    [0, 0.12].forEach((offset, idx) => {
+      const start = now + offset;
+      const osc = ctx.createOscillator();
+      const filter = ctx.createBiquadFilter();
+      const gain = ctx.createGain();
+
+      osc.type = 'sawtooth';
+      const baseFreq = idx === 0 ? 310 : 340;
+      osc.frequency.setValueAtTime(baseFreq, start);
+      osc.frequency.exponentialRampToValueAtTime(baseFreq * 0.72, start + 0.085);
+
+      filter.type = 'bandpass';
+      filter.frequency.setValueAtTime(1150, start);
+      filter.frequency.exponentialRampToValueAtTime(780, start + 0.085);
+      filter.Q.setValueAtTime(3.6, start);
+
+      gain.gain.setValueAtTime(0.001, start);
+      gain.gain.linearRampToValueAtTime(0.13, start + 0.014);
+      gain.gain.exponentialRampToValueAtTime(0.001, start + 0.095);
+
+      osc.connect(filter);
+      filter.connect(gain);
+      gain.connect(ctx.destination);
+
+      osc.start(start);
+      osc.stop(start + 0.1);
+    });
+  } catch {
+    // Ignore audio context errors
+  }
+}
+
+export function playWaterStrokeSound(boosted = false): void {
+  try {
+    const ctx = getAudioContext();
+    if (!ctx) return;
+    const now = ctx.currentTime;
+
+    const noise = ctx.createBufferSource();
+    noise.buffer = getNoiseBuffer(ctx);
+
+    const filter = ctx.createBiquadFilter();
+    filter.type = 'bandpass';
+    filter.frequency.setValueAtTime(boosted ? 980 : 620, now);
+    filter.frequency.exponentialRampToValueAtTime(boosted ? 360 : 250, now + 0.09);
+    filter.Q.setValueAtTime(1.4, now);
+
+    const gain = ctx.createGain();
+    gain.gain.setValueAtTime(0.001, now);
+    gain.gain.linearRampToValueAtTime(boosted ? 0.17 : 0.11, now + 0.015);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.1);
+
+    noise.connect(filter);
+    filter.connect(gain);
+    gain.connect(ctx.destination);
+
+    noise.start(now);
+    noise.stop(now + 0.11);
+  } catch {
+    // Ignore audio context errors
   }
 }
 

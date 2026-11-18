@@ -993,7 +993,7 @@ export function GroupTasksView({
     pinRules.length + togetherPairs.length + apartPairs.length;
 
   return (
-    <div className="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8 pb-24 lg:pb-8">
+    <div className="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8 pb-[calc(6rem+env(safe-area-inset-bottom))] md:pb-8">
       <div className="max-w-6xl mx-auto space-y-6">
         {/* Page Header */}
         <div className="pb-5 border-b border-slate-200 dark:border-slate-800 flex flex-col sm:flex-row sm:items-end justify-between gap-3">

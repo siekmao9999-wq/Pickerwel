@@ -25,7 +25,21 @@ import {
   Square,
 } from 'lucide-react';
 import { usePickerwel } from '../PickerwelProvider';
-import { type OfflineQuiz, type QuizQuestion } from '@/lib/offline-quizzes';
+import { MathText } from '../MathText';
+import type { QuizCreatePreset } from './SubjectGradeQuizPicker';
+import {
+  getGradeLabel,
+  getSubjectLabel,
+  GRADE_GROUPS,
+  GRADE_LEVELS,
+  resolveQuizGradeId,
+  resolveQuizSubjectId,
+  SUBJECT_CATALOG,
+  type GradeId,
+  type OfflineQuiz,
+  type QuizQuestion,
+  type SubjectId,
+} from '@/lib/offline-quizzes';
 import { QUICK_START_ENTRIES } from '@/lib/templates';
 import {
   playCorrectSound,
@@ -38,7 +52,7 @@ import { COPY } from '@/lib/i18n';
 
 interface WaygroundGameProps {
   quizzes: OfflineQuiz[];
-  onCreateQuiz: () => void;
+  onCreateQuiz: (preset?: QuizCreatePreset) => void;
   onEditQuiz: (quiz: OfflineQuiz) => void;
   onDeleteQuiz: (quizId: string) => void;
 }
@@ -133,6 +147,8 @@ export function WaygroundGame({
   const [qIndex, setQIndex] = useState(0);
 
   // Lobby options
+  const [filterSubject, setFilterSubject] = useState<'all' | SubjectId>('all');
+  const [filterGrade, setFilterGrade] = useState<'all' | GradeId>('all');
   const [timerEnabled, setTimerEnabled] = useState(true);
   const [shuffleQuestions, setShuffleQuestions] = useState(false);
   const [shuffleOptions, setShuffleOptions] = useState(false);
@@ -439,7 +455,16 @@ export function WaygroundGame({
           </div>
           <button
             type="button"
-            onClick={onCreateQuiz}
+            onClick={() =>
+              onCreateQuiz(
+                filterSubject !== 'all' || filterGrade !== 'all'
+                  ? {
+                      subjectId: filterSubject === 'all' ? 'math' : filterSubject,
+                      gradeId: filterGrade === 'all' ? 'grade_7' : filterGrade,
+                    }
+                  : undefined
+              )
+            }
             className="min-h-[42px] px-4 py-2 rounded-xl bg-gradient-to-r from-[#3B82F6] to-[#4F46E5] hover:from-blue-600 hover:to-indigo-700 text-white text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer whitespace-nowrap self-start shadow-sm"
           >
             <Plus className="w-4 h-4" />
@@ -447,8 +472,46 @@ export function WaygroundGame({
           </button>
         </div>
 
-        {/* Full-Featured Session Options Bar */}
+        {/* Full-Featured Session Options & Subject/Grade Filter Bar */}
         <div className="p-3.5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 flex flex-wrap items-center gap-2.5">
+          <select
+            aria-label={t.quizSubjectLabel}
+            value={filterSubject}
+            onChange={(e) => {
+              setFilterSubject(e.target.value as 'all' | SubjectId);
+              setFilterGrade('all');
+            }}
+            className="min-h-[38px] px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs font-semibold text-slate-800 dark:text-slate-100"
+          >
+            <option value="all">{t.allSubjectsLabel}</option>
+            {SUBJECT_CATALOG.map((subj) => (
+              <option key={subj.id} value={subj.id}>
+                {settings.language === 'km' ? subj.labelKm : subj.labelEn}
+              </option>
+            ))}
+          </select>
+
+          <select
+            aria-label={t.quizGradeLabel}
+            value={filterGrade}
+            onChange={(e) => setFilterGrade(e.target.value as 'all' | GradeId)}
+            className="min-h-[38px] px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs font-semibold text-slate-800 dark:text-slate-100"
+          >
+            <option value="all">{t.allGradesLabel}</option>
+            {GRADE_GROUPS.map((grp) => (
+              <optgroup
+                key={grp.id}
+                label={settings.language === 'km' ? grp.labelKm : grp.labelEn}
+              >
+                {GRADE_LEVELS.filter((g) => g.group === grp.id).map((g) => (
+                  <option key={g.id} value={g.id}>
+                    {settings.language === 'km' ? g.labelKm : g.labelEn}
+                  </option>
+                ))}
+              </optgroup>
+            ))}
+          </select>
+
           <button
             type="button"
             onClick={() => setTimerEnabled((v) => !v)}
@@ -491,8 +554,16 @@ export function WaygroundGame({
 
         {/* Quiz Library Grid */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {quizzes.map((quiz) => {
+          {quizzes
+            .filter((quiz) => {
+              if (filterSubject !== 'all' && resolveQuizSubjectId(quiz) !== filterSubject) return false;
+              if (filterGrade !== 'all' && resolveQuizGradeId(quiz) !== filterGrade) return false;
+              return true;
+            })
+            .map((quiz) => {
             const best = bestScores[quiz.id] || 0;
+            const sid = resolveQuizSubjectId(quiz);
+            const gid = resolveQuizGradeId(quiz);
             return (
               <div
                 key={quiz.id}
@@ -500,7 +571,9 @@ export function WaygroundGame({
               >
                 <div>
                   <p className="text-xs text-slate-500 dark:text-slate-400 tabular-nums">
-                    {quiz.subject}
+                    {getSubjectLabel(sid, settings.language)}
+                    <span aria-hidden="true"> · </span>
+                    {getGradeLabel(gid, settings.language, true)}
                     <span aria-hidden="true"> · </span>
                     {t.questionsCount(quiz.questions.length)}
                     {best > 0 && (
@@ -637,17 +710,17 @@ export function WaygroundGame({
                 )}
                 <div className="min-w-0">
                   <p className="text-sm font-semibold text-slate-900 dark:text-white">
-                    {idx + 1}. {log.prompt}
+                    {idx + 1}. <MathText text={log.prompt} />
                   </p>
                   <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
                     <span className="font-semibold text-emerald-600 dark:text-emerald-400">
-                      {CHOICE_LETTERS[log.correctIndex]}. {log.options[log.correctIndex]}
+                      {CHOICE_LETTERS[log.correctIndex]}. <MathText text={log.options[log.correctIndex]} />
                     </span>
                     {!log.isCorrect && log.chosenIndex !== null && (
                       <span className="text-rose-600 dark:text-rose-400">
                         {' '}
                         · {t.wgYourAnswerLabel}: {CHOICE_LETTERS[log.chosenIndex]}.{' '}
-                        {log.options[log.chosenIndex]}
+                        <MathText text={log.options[log.chosenIndex]} />
                       </span>
                     )}
                   </p>
@@ -738,7 +811,7 @@ export function WaygroundGame({
           </div>
 
           <h3 className="font-display text-xl sm:text-2xl font-bold text-slate-900 dark:text-white text-center leading-relaxed">
-            {currentQuestion.prompt}
+            <MathText text={currentQuestion.prompt} />
           </h3>
 
           {/* Power-ups Bar */}
@@ -830,7 +903,9 @@ export function WaygroundGame({
                     >
                       {CHOICE_LETTERS[idx]}
                     </span>
-                    <span className="break-words leading-snug">{opt}</span>
+                    <span className="break-words leading-snug">
+                      <MathText text={opt} />
+                    </span>
                   </span>
 
                   <span className="shrink-0 flex items-center gap-1.5">
@@ -859,7 +934,7 @@ export function WaygroundGame({
                   <span className="text-rose-600 dark:text-rose-400">
                     {timedOut ? t.timeOutFeedback : t.wrongFeedback} ·{' '}
                     {CHOICE_LETTERS[currentQuestion.correctIndex]}.{' '}
-                    {currentQuestion.options[currentQuestion.correctIndex]}
+                    <MathText text={currentQuestion.options[currentQuestion.correctIndex]} />
                   </span>
                 )}
               </div>

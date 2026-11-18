@@ -13,25 +13,13 @@ import {
 import { usePickerwel } from './PickerwelProvider';
 import { COPY } from '@/lib/i18n';
 import { playWinSound, playTickSound, triggerHaptic } from '@/lib/sound';
+import { formatStopwatchMs } from '@/lib/time-format';
+export { formatStopwatchMs };
 
 interface LapRecord {
   lapNumber: number;
   splitMs: number;
   totalMs: number;
-}
-
-export function formatStopwatchMs(ms: number): { main: string; centis: string } {
-  const safe = Math.max(0, Math.floor(ms));
-  const hours = Math.floor(safe / 3600000);
-  const minutes = Math.floor((safe % 3600000) / 60000);
-  const seconds = Math.floor((safe % 60000) / 1000);
-  const centis = Math.floor((safe % 1000) / 10);
-
-  const mm = String(minutes).padStart(2, '0');
-  const ss = String(seconds).padStart(2, '0');
-  const cc = String(centis).padStart(2, '0');
-  const main = hours > 0 ? `${String(hours).padStart(2, '0')}:${mm}:${ss}` : `${mm}:${ss}`;
-  return { main, centis: cc };
 }
 
 export function StopwatchView() {
@@ -201,7 +189,7 @@ export function StopwatchView() {
   ];
 
   return (
-    <div className="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8 pb-24 lg:pb-8">
+    <div className="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8 pb-[calc(6rem+env(safe-area-inset-bottom))] md:pb-8">
       <div className="max-w-3xl mx-auto space-y-6">
         {/* Header & Mode Switch */}
         <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 pb-5 border-b border-slate-200 dark:border-slate-800">

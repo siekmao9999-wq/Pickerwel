@@ -6,6 +6,11 @@
     font-family: var(--font-siemreap), var(--font-poppins), system-ui, sans-serif;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+    overflow-x: clip;
+  }
+
+  body {
+    overflow-x: clip;
   }
 
   h1, h2, h3, h4, .font-display {
@@ -15,6 +20,11 @@
   .font-latin {
     font-family: var(--font-poppins), var(--font-kantumruy), system-ui, sans-serif;
   }
+}
+
+.math-text .katex {
+  font-size: 1.08em;
+  line-height: 1.35;
 }
 
 @keyframes wheel-aura {

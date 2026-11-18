@@ -24,12 +24,16 @@ export function PWAInstallButton({ language, compact = false }: PWAInstallButton
       <button
         type="button"
         onClick={install}
+        title={t.installApp}
+        aria-label={t.installApp}
         className={`min-h-[40px] rounded-xl bg-slate-900 dark:bg-slate-800 hover:bg-slate-800 dark:hover:bg-slate-700 text-white text-xs font-semibold flex items-center justify-center gap-2 transition-colors cursor-pointer whitespace-nowrap ${
-          compact ? 'px-3 py-2' : 'w-full px-3.5 py-2'
+          compact ? 'px-3 py-2' : 'w-full px-2 lg:px-3.5 py-2'
         }`}
       >
         <Download className="w-3.5 h-3.5 shrink-0" />
-        <span className="truncate">{t.installApp}</span>
+        <span className={compact ? 'truncate' : 'truncate md:hidden lg:inline'}>
+          {t.installApp}
+        </span>
       </button>
     );
   }
@@ -40,12 +44,16 @@ export function PWAInstallButton({ language, compact = false }: PWAInstallButton
         <button
           type="button"
           onClick={() => setShowIOSGuide(true)}
+          title={t.installOnIOS}
+          aria-label={t.installOnIOS}
           className={`min-h-[40px] rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-xs font-semibold text-slate-700 dark:text-slate-200 flex items-center justify-center gap-2 transition-colors cursor-pointer whitespace-nowrap ${
-            compact ? 'px-3 py-2' : 'w-full px-3.5 py-2'
+            compact ? 'px-3 py-2' : 'w-full px-2 lg:px-3.5 py-2'
           }`}
         >
           <Download className="w-3.5 h-3.5 shrink-0" />
-          <span className="truncate">{t.installOnIOS}</span>
+          <span className={compact ? 'truncate' : 'truncate md:hidden lg:inline'}>
+            {t.installOnIOS}
+          </span>
         </button>
 
         {showIOSGuide && (

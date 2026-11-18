@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from 'next';
 import { Kantumruy_Pro, Siemreap, Poppins } from 'next/font/google';
 import './globals.css';
 import { PickerwelProvider } from '@/components/PickerwelProvider';
+import { PickerwelShell } from '@/components/PickerwelShell';
 
 const kantumruyPro = Kantumruy_Pro({
   subsets: ['khmer', 'latin'],
@@ -28,6 +29,7 @@ export const viewport: Viewport = {
   themeColor: '#3B82F6',
   width: 'device-width',
   initialScale: 1,
+  viewportFit: 'cover',
 };
 
 export const metadata: Metadata = {
@@ -68,7 +70,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         className="bg-[#F8FAFC] text-slate-900 dark:bg-[#0F172A] dark:text-slate-100 antialiased"
         suppressHydrationWarning
       >
-        <PickerwelProvider>{children}</PickerwelProvider>
+        <PickerwelProvider>
+          <PickerwelShell>{children}</PickerwelShell>
+        </PickerwelProvider>
       </body>
     </html>
   );

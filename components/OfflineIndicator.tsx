@@ -19,7 +19,7 @@ export function OfflineIndicator({ language }: OfflineIndicatorProps) {
     <div
       role="status"
       aria-live="polite"
-      className="fixed bottom-20 lg:bottom-4 left-4 z-40 flex items-center gap-2 rounded-xl bg-amber-600 dark:bg-amber-500 px-3.5 py-2 text-xs font-semibold text-white shadow-lg"
+      className="fixed bottom-[calc(4.75rem+env(safe-area-inset-bottom))] md:bottom-4 left-4 z-40 flex items-center gap-2 rounded-xl bg-amber-600 dark:bg-amber-500 px-3.5 py-2 text-xs font-semibold text-white shadow-lg"
     >
       <WifiOff className="w-4 h-4 shrink-0" />
       <span>{t.offlineBanner}</span>

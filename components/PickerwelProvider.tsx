@@ -6,8 +6,10 @@ import React, {
   useEffect,
   useState,
   useCallback,
+  useMemo,
   useRef,
 } from 'react';
+import { usePathname, useRouter } from 'next/navigation';
 import {
   onAuthStateChanged,
   signInWithPopup,
@@ -32,11 +34,25 @@ import {
   clampEntries,
   clampTitle,
   sanitizeId,
+  registerMemberWithPasscode,
+  subscribePasscodeMemberStatus,
+  subscribeAdminPasscodes,
+  subscribeAllPasscodeMembers,
+  createAdminPasscode,
+  toggleAdminPasscodeActive,
+  deleteAdminPasscode,
+  updatePasscodeMemberStatus,
+  deletePasscodeMember,
+  DEFAULT_ADMIN_DISPLAY_NAME,
+  subscribePublicAppConfig,
+  updatePublicAdminName,
   type AccountRole,
   type AccountStatus,
   type UserPreferences,
   type SavedWheel,
   type SpinResultRecord,
+  type AdminPasscode,
+  type PasscodeMember,
 } from '@/lib/firestore-service';
 import { QUICK_START_ENTRIES, WHEEL_TEMPLATES, type WheelTemplate } from '@/lib/templates';
 import type { PaletteId } from '@/lib/palettes';
@@ -53,6 +69,31 @@ export type NavSection =
   | 'history'
   | 'settings'
   | 'admin';
+
+export const NAV_ROUTES: Record<NavSection, string> = {
+  home: '/',
+  wheels: '/wheels',
+  templates: '/templates',
+  groups: '/groups',
+  games: '/games',
+  stopwatch: '/stopwatch',
+  history: '/history',
+  settings: '/settings',
+  admin: '/admin',
+};
+
+function navFromPathname(pathname: string | null): NavSection {
+  if (!pathname) return 'home';
+  if (pathname.startsWith('/wheels')) return 'wheels';
+  if (pathname.startsWith('/templates')) return 'templates';
+  if (pathname.startsWith('/groups')) return 'groups';
+  if (pathname.startsWith('/games')) return 'games';
+  if (pathname.startsWith('/stopwatch')) return 'stopwatch';
+  if (pathname.startsWith('/history')) return 'history';
+  if (pathname.startsWith('/settings')) return 'settings';
+  if (pathname.startsWith('/admin')) return 'admin';
+  return 'home';
+}
 
 export interface LocalSettings {
   theme: 'light' | 'dark';
@@ -79,7 +120,17 @@ const STORAGE_KEYS = {
   localWheels: 'pickerwel_local_wheels_v1',
   localHistory: 'pickerwel_local_history_v1',
   activeWheelId: 'pickerwel_active_wheel_id_v1',
+  passcodeSession: 'pickerwel_passcode_session_v1',
+  appAdminName: 'pickerwel_admin_name_v1',
 };
+
+export interface PasscodeSession {
+  memberId: string;
+  displayName: string;
+  passcode: string;
+  status: 'approved' | 'rejected';
+  passcodeActive: boolean;
+}
 
 function createStarterLocalWheels(): SavedWheel[] {
   const now = Date.now();
@@ -112,18 +163,37 @@ function createStarterLocalWheels(): SavedWheel[] {
 interface PickerwelContextValue {
   user: User | null;
   userProfile: UserPreferences | null;
+  passcodeSession: PasscodeSession | null;
+  isSignedIn: boolean;
+  currentDisplayName: string;
   isApprovedCloudUser: boolean;
   allUsers: UserPreferences[];
   reviewUser: (targetUid: string, status: AccountStatus, role: AccountRole) => Promise<void>;
 
+  adminPasscodes: AdminPasscode[];
+  passcodeMembers: PasscodeMember[];
+  createPasscode: (code: string, label: string) => Promise<void>;
+  togglePasscode: (code: string, active: boolean) => Promise<void>;
+  removePasscode: (code: string) => Promise<void>;
+  reviewPasscodeMember: (memberId: string, status: 'approved' | 'rejected') => Promise<void>;
+  removePasscodeMember: (memberId: string) => Promise<void>;
+  appAdminName: string;
+  saveAppAdminName: (name: string) => Promise<void>;
+
   authReady: boolean;
   authLoading: boolean;
   authError: string | null;
+  authModalOpen: boolean;
+  openAuthModal: () => void;
+  closeAuthModal: () => void;
+  registerWithPasscode: (name: string, passcode: string) => Promise<void>;
   signInWithGoogle: () => Promise<void>;
   signOut: () => Promise<void>;
 
   activeNav: NavSection;
   setActiveNav: (nav: NavSection) => void;
+  groupsSyncKey: number;
+  bumpGroupsSyncKey: () => void;
 
   settings: LocalSettings;
   updateSettings: (patch: Partial<LocalSettings>) => void;
@@ -157,12 +227,32 @@ const PickerwelContext = createContext<PickerwelContextValue | null>(null);
 export function PickerwelProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [userProfile, setUserProfile] = useState<UserPreferences | null>(null);
+  const [passcodeSession, setPasscodeSession] = useState<PasscodeSession | null>(null);
   const [allUsers, setAllUsers] = useState<UserPreferences[]>([]);
+  const [adminPasscodes, setAdminPasscodes] = useState<AdminPasscode[]>([]);
+  const [passcodeMembers, setPasscodeMembers] = useState<PasscodeMember[]>([]);
+  const [appAdminName, setAppAdminName] = useState<string>(DEFAULT_ADMIN_DISPLAY_NAME);
   const [authReady, setAuthReady] = useState(false);
   const [authLoading, setAuthLoading] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
+  const [authModalOpen, setAuthModalOpen] = useState(false);
 
-  const [activeNav, setActiveNav] = useState<NavSection>('home');
+  const pathname = usePathname();
+  const router = useRouter();
+  const activeNav = useMemo(() => navFromPathname(pathname), [pathname]);
+  const setActiveNav = useCallback(
+    (nav: NavSection) => {
+      const target = NAV_ROUTES[nav] || '/';
+      if (pathname !== target) {
+        router.push(target);
+      }
+    },
+    [pathname, router]
+  );
+  const [groupsSyncKey, setGroupsSyncKey] = useState(0);
+  const bumpGroupsSyncKey = useCallback(() => {
+    setGroupsSyncKey((k) => k + 1);
+  }, []);
   const [settings, setSettings] = useState<LocalSettings>(DEFAULT_SETTINGS);
   const [localWheels, setLocalWheels] = useState<SavedWheel[]>(() => createStarterLocalWheels());
   const [cloudWheels, setCloudWheels] = useState<SavedWheel[]>([]);
@@ -222,11 +312,43 @@ export function PickerwelProvider({ children }: { children: React.ReactNode }) {
         if (savedActiveId) {
           setActiveWheelId(savedActiveId);
         }
+
+        const savedPasscodeSession = localStorage.getItem(STORAGE_KEYS.passcodeSession);
+        if (savedPasscodeSession) {
+          const parsedSession = JSON.parse(savedPasscodeSession) as Partial<PasscodeSession>;
+          if (parsedSession.memberId && parsedSession.displayName && parsedSession.passcode) {
+            setPasscodeSession({
+              memberId: parsedSession.memberId,
+              displayName: parsedSession.displayName,
+              passcode: parsedSession.passcode,
+              status: parsedSession.status === 'rejected' ? 'rejected' : 'approved',
+              passcodeActive: parsedSession.passcodeActive !== false,
+            });
+          }
+        }
+
+        const savedAdminName = localStorage.getItem(STORAGE_KEYS.appAdminName);
+        if (savedAdminName && savedAdminName.trim()) {
+          setAppAdminName(savedAdminName.trim().slice(0, 80));
+        }
       } catch {
         // Ignore storage parsing issues
       }
       setHydrated(true);
     });
+
+    const unsubPublicConfig = subscribePublicAppConfig((adminName) => {
+      setAppAdminName(adminName);
+      try {
+        localStorage.setItem(STORAGE_KEYS.appAdminName, adminName);
+      } catch {
+        // Ignore quota errors
+      }
+    });
+
+    return () => {
+      unsubPublicConfig();
+    };
   }, []);
 
   // Sync theme class on <html>
@@ -271,6 +393,19 @@ export function PickerwelProvider({ children }: { children: React.ReactNode }) {
       // Ignore quota errors
     }
   }, [activeWheelId, hydrated]);
+
+  useEffect(() => {
+    if (!hydrated) return;
+    try {
+      if (passcodeSession) {
+        localStorage.setItem(STORAGE_KEYS.passcodeSession, JSON.stringify(passcodeSession));
+      } else {
+        localStorage.removeItem(STORAGE_KEYS.passcodeSession);
+      }
+    } catch {
+      // Ignore quota errors
+    }
+  }, [passcodeSession, hydrated]);
 
   // Listen to Firebase Auth & User Profile approval status
   useEffect(() => {
@@ -357,16 +492,49 @@ export function PickerwelProvider({ children }: { children: React.ReactNode }) {
     };
   }, [user, isApprovedCloudUser]);
 
-  // Subscribe to all user registration requests when signed in as Admin
+  // Watch passcode member & passcode validity in real time when signed in via Name + Passcode
+  useEffect(() => {
+    if (user || !passcodeSession?.memberId || !passcodeSession?.passcode) return;
+    const unsub = subscribePasscodeMemberStatus(
+      passcodeSession.memberId,
+      passcodeSession.passcode,
+      ({ status, passcodeActive }) => {
+        setPasscodeSession((prev) => {
+          if (!prev) return null;
+          if (prev.status === status && prev.passcodeActive === passcodeActive) {
+            return prev;
+          }
+          return { ...prev, status, passcodeActive };
+        });
+      }
+    );
+    return () => unsub();
+  }, [user, passcodeSession?.memberId, passcodeSession?.passcode]);
+
+  // Subscribe to all user registration requests, passcodes & passcode members when signed in as Admin
   useEffect(() => {
     if (!isAdmin) {
-      queueMicrotask(() => setAllUsers([]));
+      queueMicrotask(() => {
+        setAllUsers([]);
+        setAdminPasscodes([]);
+        setPasscodeMembers([]);
+      });
       return;
     }
     const unsubAll = subscribeAllUsers((users) => {
       setAllUsers(users);
     });
-    return () => unsubAll();
+    const unsubCodes = subscribeAdminPasscodes((codes) => {
+      setAdminPasscodes(codes);
+    });
+    const unsubMembers = subscribeAllPasscodeMembers((members) => {
+      setPasscodeMembers(members);
+    });
+    return () => {
+      unsubAll();
+      unsubCodes();
+      unsubMembers();
+    };
   }, [isAdmin]);
 
   const wheels = isApprovedCloudUser && cloudWheels.length > 0 ? cloudWheels : localWheels;
@@ -376,14 +544,51 @@ export function PickerwelProvider({ children }: { children: React.ReactNode }) {
   const activeWheel =
     wheels.find((w) => w.id === activeWheelId) || wheels[0] || fallbackWheel;
 
+  const openAuthModal = useCallback(() => {
+    setAuthError(null);
+    setAuthModalOpen(true);
+  }, []);
+
+  const closeAuthModal = useCallback(() => {
+    setAuthError(null);
+    setAuthModalOpen(false);
+  }, []);
+
+  const registerWithPasscode = useCallback(async (name: string, passcode: string) => {
+    setAuthError(null);
+    const member = await registerMemberWithPasscode(name, passcode);
+    setPasscodeSession({
+      memberId: member.id,
+      displayName: member.displayName,
+      passcode: member.passcode,
+      status: member.status,
+      passcodeActive: true,
+    });
+  }, []);
+
   const signInWithGoogle = useCallback(async () => {
     setAuthError(null);
     setAuthLoading(true);
     try {
       await signInWithPopup(auth, googleProvider);
+      setPasscodeSession(null);
+      setAuthModalOpen(false);
     } catch (err) {
-      console.error('Sign in failed:', err);
-      setAuthError('auth_failed');
+      const code =
+        typeof err === 'object' && err !== null && 'code' in err
+          ? String((err as { code?: unknown }).code)
+          : '';
+      if (
+        code === 'auth/popup-closed-by-user' ||
+        code === 'auth/cancelled-popup-request'
+      ) {
+        setAuthError('auth_popup_closed');
+      } else if (code === 'auth/popup-blocked') {
+        setAuthError('auth_popup_blocked');
+      } else {
+        console.warn('Google sign-in failed:', code || err);
+        setAuthError('auth_failed');
+      }
     } finally {
       setAuthLoading(false);
     }
@@ -391,13 +596,16 @@ export function PickerwelProvider({ children }: { children: React.ReactNode }) {
 
   const signOut = useCallback(async () => {
     try {
-      await firebaseSignOut(auth);
+      setPasscodeSession(null);
+      if (auth.currentUser) {
+        await firebaseSignOut(auth);
+      }
       setActiveWheelId(localWheels[0]?.id || 'quick_start_wheel');
       if (activeNav === 'admin') setActiveNav('home');
     } catch (err) {
       console.error('Sign out failed:', err);
     }
-  }, [activeNav, localWheels]);
+  }, [activeNav, localWheels, setActiveNav]);
 
   const reviewUser = useCallback(
     async (targetUid: string, status: AccountStatus, role: AccountRole) => {
@@ -406,6 +614,64 @@ export function PickerwelProvider({ children }: { children: React.ReactNode }) {
     },
     [isAdmin, user]
   );
+
+  const createPasscode = useCallback(
+    async (code: string, label: string) => {
+      if (!user || !isAdmin) return;
+      await createAdminPasscode(user.uid, code, label);
+    },
+    [isAdmin, user]
+  );
+
+  const togglePasscode = useCallback(
+    async (code: string, active: boolean) => {
+      if (!user || !isAdmin) return;
+      await toggleAdminPasscodeActive(code, active);
+    },
+    [isAdmin, user]
+  );
+
+  const removePasscode = useCallback(
+    async (code: string) => {
+      if (!user || !isAdmin) return;
+      await deleteAdminPasscode(code);
+    },
+    [isAdmin, user]
+  );
+
+  const reviewPasscodeMember = useCallback(
+    async (memberId: string, status: 'approved' | 'rejected') => {
+      if (!user || !isAdmin) return;
+      await updatePasscodeMemberStatus(memberId, status);
+    },
+    [isAdmin, user]
+  );
+
+  const removePasscodeMember = useCallback(
+    async (memberId: string) => {
+      if (!user || !isAdmin) return;
+      await deletePasscodeMember(memberId);
+    },
+    [isAdmin, user]
+  );
+
+  const saveAppAdminName = useCallback(
+    async (name: string) => {
+      if (!user || !isAdmin) return;
+      const saved = await updatePublicAdminName(name);
+      setAppAdminName(saved);
+      try {
+        localStorage.setItem(STORAGE_KEYS.appAdminName, saved);
+      } catch {
+        // Ignore quota errors
+      }
+    },
+    [isAdmin, user]
+  );
+
+  const isSignedIn = Boolean(user || passcodeSession);
+  const currentDisplayName =
+    user?.displayName || user?.email?.split('@')[0] || passcodeSession?.displayName || '';
 
   const updateSettings = useCallback(
     (patch: Partial<LocalSettings>) => {
@@ -525,7 +791,7 @@ export function PickerwelProvider({ children }: { children: React.ReactNode }) {
       await createNewWheel(title, template.entries, template.paletteId);
       setActiveNav('home');
     },
-    [createNewWheel, settings.language]
+    [createNewWheel, setActiveNav, settings.language]
   );
 
   const duplicateWheel = useCallback(
@@ -623,16 +889,34 @@ export function PickerwelProvider({ children }: { children: React.ReactNode }) {
       value={{
         user,
         userProfile,
+        passcodeSession,
+        isSignedIn,
+        currentDisplayName,
         isApprovedCloudUser,
         allUsers,
         reviewUser,
+        adminPasscodes,
+        passcodeMembers,
+        createPasscode,
+        togglePasscode,
+        removePasscode,
+        reviewPasscodeMember,
+        removePasscodeMember,
+        appAdminName,
+        saveAppAdminName,
         authReady,
         authLoading,
         authError,
+        authModalOpen,
+        openAuthModal,
+        closeAuthModal,
+        registerWithPasscode,
         signInWithGoogle,
         signOut,
         activeNav,
         setActiveNav,
+        groupsSyncKey,
+        bumpGroupsSyncKey,
         settings,
         updateSettings,
         wheels,

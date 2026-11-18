@@ -22,9 +22,12 @@ export function DashboardView() {
   const {
     user,
     userProfile,
+    passcodeSession,
+    isSignedIn,
+    currentDisplayName,
     isApprovedCloudUser,
     authLoading,
-    signInWithGoogle,
+    openAuthModal,
     signOut,
     settings,
     wheels,
@@ -59,21 +62,24 @@ export function DashboardView() {
     setActiveNav('home');
   };
 
-  const displayName =
-    user?.displayName || user?.email?.split('@')[0] || '';
+  const isPasscodeRevoked = Boolean(
+    passcodeSession && (passcodeSession.status === 'rejected' || !passcodeSession.passcodeActive)
+  );
 
   return (
-    <div className="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8 pb-24 lg:pb-8">
+    <div className="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8 pb-[calc(6rem+env(safe-area-inset-bottom))] md:pb-8">
       <div className="max-w-5xl mx-auto space-y-8">
         {/* Top Bar: Greeting / Name + Live Search + Create Button */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-5 border-b border-slate-200 dark:border-slate-800">
           <div className="min-w-0">
             <h1 className="font-display text-2xl sm:text-3xl font-bold text-slate-900 dark:text-white truncate">
-              {user ? t.dashboardGreeting(displayName) : t.dashboardGuestTitle}
+              {isSignedIn ? t.dashboardGreeting(currentDisplayName) : t.dashboardGuestTitle}
             </h1>
             <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
               {isApprovedCloudUser
                 ? `${t.navMyWheels} · ${wheels.length}`
+                : passcodeSession
+                ? `${t.authPasscodeBadge}: ${passcodeSession.passcode} · ${wheels.length}`
                 : t.dashboardGuestBanner}
             </p>
           </div>
@@ -111,8 +117,18 @@ export function DashboardView() {
           />
         )}
 
-        {/* Unauthenticated Cloud Save Prompt */}
-        {!user && (
+        {!user && isPasscodeRevoked && passcodeSession && (
+          <ApprovalGateBanner
+            status="rejected"
+            email={`${passcodeSession.displayName} · ${passcodeSession.passcode}`}
+            language={settings.language}
+            customDesc={t.rejectedPasscodeDesc}
+            onSignOut={signOut}
+          />
+        )}
+
+        {/* Unauthenticated Registration Prompt */}
+        {!isSignedIn && (
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-5 rounded-2xl bg-blue-50/70 dark:bg-slate-900 border border-blue-200 dark:border-slate-800">
             <div className="min-w-0">
               <p className="font-display text-base font-semibold text-slate-900 dark:text-white">
@@ -124,7 +140,7 @@ export function DashboardView() {
             </div>
             <button
               type="button"
-              onClick={signInWithGoogle}
+              onClick={openAuthModal}
               disabled={authLoading}
               className="min-h-[44px] px-5 py-2.5 rounded-xl bg-gradient-to-r from-[#3B82F6] to-[#4F46E5] hover:from-blue-600 hover:to-indigo-700 text-white text-sm font-semibold inline-flex items-center justify-center gap-2 transition-all whitespace-nowrap shrink-0 cursor-pointer disabled:opacity-60"
             >
