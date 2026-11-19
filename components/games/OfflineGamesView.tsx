@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import dynamic from 'next/dynamic';
-import { Fish, Waves, WavesLadder, Layers, Spade, Palette, Zap, Compass, Trophy, BarChart3, Lightbulb } from 'lucide-react';
+import { Fish, Waves, WavesLadder, Layers, Spade, Palette, Zap, Compass, Trophy, BarChart3, Lightbulb, Sparkles, FlaskConical } from 'lucide-react';
 import { usePickerwel } from '../PickerwelProvider';
 import type { QuizCreatePreset } from './SubjectGradeQuizPicker';
 
@@ -15,6 +15,8 @@ const StroopGame = dynamic(() => import('./StroopGame').then((m) => m.StroopGame
 const WaygroundGame = dynamic(() => import('./WaygroundGame').then((m) => m.WaygroundGame), { ssr: false });
 const PathPuzzleGame = dynamic(() => import('./PathPuzzleGame').then((m) => m.PathPuzzleGame), { ssr: false });
 const KahootGame = dynamic(() => import('./KahootGame').then((m) => m.KahootGame), { ssr: false });
+const QuizizzGame = dynamic(() => import('./QuizizzGame').then((m) => m.QuizizzGame), { ssr: false });
+const EduSimulationsView = dynamic(() => import('./EduSimulationsView').then((m) => m.EduSimulationsView), { ssr: false });
 const MentiPollGame = dynamic(() => import('./MentiPollGame').then((m) => m.MentiPollGame), { ssr: false });
 const BrainstormGame = dynamic(() => import('./BrainstormGame').then((m) => m.BrainstormGame), { ssr: false });
 const QuizEditorModal = dynamic(() => import('./QuizEditorModal').then((m) => m.QuizEditorModal), { ssr: false });
@@ -36,6 +38,8 @@ export type OfflineGameTab =
   | 'wayground'
   | 'path_puzzle'
   | 'kahoot'
+  | 'quizizz'
+  | 'simulations'
   | 'menti'
   | 'brainstorm';
 
@@ -98,6 +102,8 @@ export function OfflineGamesView() {
     { id: 'wayground', label: t.tabWayground, icon: Zap },
     { id: 'path_puzzle', label: t.tabPathPuzzle, icon: Compass },
     { id: 'kahoot', label: t.tabKahoot, icon: Trophy },
+    { id: 'quizizz', label: t.tabQuizizz, icon: Sparkles },
+    { id: 'simulations', label: t.tabSimulations, icon: FlaskConical },
     { id: 'menti', label: t.tabMenti, icon: BarChart3 },
     { id: 'brainstorm', label: t.tabBrainstorm, icon: Lightbulb },
   ];
@@ -173,6 +179,19 @@ export function OfflineGamesView() {
           />
         ) : activeTab === 'path_puzzle' ? (
           <PathPuzzleGame />
+        ) : activeTab === 'quizizz' ? (
+          <QuizizzGame
+            quizzes={quizzes}
+            onCreateQuiz={handleOpenCreateQuiz}
+            onEditQuiz={(quiz) => {
+              setEditingQuiz(quiz);
+              setQuizPreset(undefined);
+              setEditorOpen(true);
+            }}
+            onDeleteQuiz={handleDeleteQuiz}
+          />
+        ) : activeTab === 'simulations' ? (
+          <EduSimulationsView />
         ) : activeTab === 'menti' ? (
           <MentiPollGame />
         ) : activeTab === 'brainstorm' ? (

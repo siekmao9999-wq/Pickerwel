@@ -321,7 +321,10 @@ export function DashboardView() {
                       </p>
                     </div>
                   </div>
-                  <time className="text-xs text-slate-400 dark:text-slate-500 tabular-nums shrink-0">
+                  <time
+                    className="text-xs text-slate-400 dark:text-slate-500 tabular-nums shrink-0"
+                    suppressHydrationWarning
+                  >
                     {new Date(item.spunAtMs).toLocaleTimeString([], {
                       hour: '2-digit',
                       minute: '2-digit',

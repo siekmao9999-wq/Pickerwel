@@ -1,6 +1,7 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
+import Link from 'next/link';
 import {
   CheckCircle2,
   XCircle,
@@ -17,18 +18,35 @@ import {
   Power,
   Users,
   Plus,
+  QrCode,
+  Inbox,
+  ExternalLink,
+  PauseCircle,
+  PlayCircle,
+  Link2,
 } from 'lucide-react';
 import { usePickerwel } from './PickerwelProvider';
+import { QrShareModal } from './QrShareModal';
+import { AssignmentSubmissionsModal } from './AssignmentSubmissionsModal';
 import { COPY } from '@/lib/i18n';
 import {
   BOOTSTRAP_ADMIN_EMAIL,
+  buildStudentTaskUrl,
+  deleteStudentAssignment,
   generateRandomPasscode,
   isValidPasscodeFormat,
+  subscribeAllAssignments,
+  updateStudentAssignment,
   type AccountStatus,
+  type StudentAssignment,
   type UserPreferences,
 } from '@/lib/firestore-service';
+import { getShareOrigin } from '@/lib/share-origin';
 
-type AdminTab = 'passcodes' | 'passcodeMembers' | 'googleUsers';
+const subscribeNoop = () => () => {};
+const getOriginServer = () => '';
+
+type AdminTab = 'passcodes' | 'passcodeMembers' | 'googleUsers' | 'studentTasks';
 
 export function AdminView() {
   const {
@@ -55,14 +73,53 @@ export function AdminView() {
   const [busyId, setBusyId] = useState<string | null>(null);
 
   // Passcode creator state
-  const [newCode, setNewCode] = useState(() => generateRandomPasscode('PW'));
+  const [newCode, setNewCode] = useState('PW-2026');
+  const shareOrigin = useSyncExternalStore(
+    subscribeNoop,
+    getShareOrigin,
+    getOriginServer
+  );
   const [newLabel, setNewLabel] = useState('');
   const [codeError, setCodeError] = useState<string | null>(null);
   const [creatingCode, setCreatingCode] = useState(false);
   const [copiedCode, setCopiedCode] = useState<string | null>(null);
+  const [copiedInviteCode, setCopiedInviteCode] = useState<string | null>(null);
   const [adminNameDraft, setAdminNameDraft] = useState<string | null>(null);
   const [savingAdminName, setSavingAdminName] = useState(false);
   const [adminNameSaved, setAdminNameSaved] = useState(false);
+
+  // Admin All Student Assignments state
+  const [allAssignments, setAllAssignments] = useState<StudentAssignment[]>([]);
+  const [selectedTeacherFilter, setSelectedTeacherFilter] = useState<string>('all');
+  const [copiedTaskId, setCopiedTaskId] = useState<string | null>(null);
+  const [qrModalTarget, setQrModalTarget] = useState<StudentAssignment | null>(null);
+  const [submissionsTarget, setSubmissionsTarget] = useState<StudentAssignment | null>(null);
+
+  const isApprovedAdmin = Boolean(
+    user && userProfile?.role === 'admin' && userProfile?.status === 'approved'
+  );
+
+  useEffect(() => {
+    if (!isApprovedAdmin) return;
+    const unsub = subscribeAllAssignments((list) => {
+      setAllAssignments(list);
+    });
+    return () => unsub();
+  }, [isApprovedAdmin]);
+
+  const teacherOptions = useMemo(() => {
+    const map = new Map<string, { ownerId: string; ownerDisplayName: string; ownerType: string }>();
+    for (const a of allAssignments) {
+      if (!map.has(a.ownerId)) {
+        map.set(a.ownerId, {
+          ownerId: a.ownerId,
+          ownerDisplayName: a.ownerDisplayName,
+          ownerType: a.ownerType,
+        });
+      }
+    }
+    return Array.from(map.values());
+  }, [allAssignments]);
 
   if (!user || userProfile?.role !== 'admin') {
     return null;
@@ -140,10 +197,61 @@ export function AdminView() {
     }
   };
 
+  const handleCopyInviteLink = async (code: string) => {
+    const origin = shareOrigin || getShareOrigin();
+    const inviteUrl = `${origin}/?code=${encodeURIComponent(code)}`;
+    try {
+      await navigator.clipboard.writeText(inviteUrl);
+    } catch {
+      const input = document.createElement('input');
+      input.value = inviteUrl;
+      document.body.appendChild(input);
+      input.select();
+      document.execCommand('copy');
+      input.remove();
+    }
+    setCopiedInviteCode(code);
+    window.setTimeout(() => {
+      setCopiedInviteCode((curr) => (curr === code ? null : curr));
+    }, 1800);
+  };
+
+  const filteredAssignments = allAssignments.filter((item) => {
+    if (selectedTeacherFilter !== 'all' && item.ownerId !== selectedTeacherFilter) {
+      return false;
+    }
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return true;
+    return (
+      item.title.toLowerCase().includes(q) ||
+      item.ownerDisplayName.toLowerCase().includes(q) ||
+      item.instructions.toLowerCase().includes(q)
+    );
+  });
+
+  const handleCopyTaskLink = async (item: StudentAssignment) => {
+    const url = buildStudentTaskUrl(item.id);
+    try {
+      await navigator.clipboard.writeText(url);
+    } catch {
+      const input = document.createElement('input');
+      input.value = url;
+      document.body.appendChild(input);
+      input.select();
+      document.execCommand('copy');
+      input.remove();
+    }
+    setCopiedTaskId(item.id);
+    window.setTimeout(() => {
+      setCopiedTaskId((curr) => (curr === item.id ? null : curr));
+    }, 1800);
+  };
+
   const mainTabs: { id: AdminTab; label: string; icon: React.ComponentType<{ className?: string }>; count?: number }[] = [
     { id: 'passcodes', label: t.adminTabPasscodes, icon: KeyRound, count: adminPasscodes.length },
     { id: 'passcodeMembers', label: t.adminTabPasscodeMembers, icon: Users, count: passcodeMembers.length },
     { id: 'googleUsers', label: t.adminTabGoogleUsers, icon: ShieldCheck, count: pendingGoogleCount },
+    { id: 'studentTasks', label: t.adminTabStudentTasks, icon: QrCode, count: allAssignments.length },
   ];
 
   const filterTabs: { id: 'all' | AccountStatus; label: string }[] = [
@@ -265,6 +373,11 @@ export function AdminView() {
         {/* ============================================================ */}
         {activeTab === 'passcodes' && (
           <div className="space-y-6">
+            <div className="p-4 rounded-xl bg-blue-50/70 dark:bg-blue-950/30 border border-blue-200/70 dark:border-blue-900/60 flex items-start gap-2.5 text-xs text-slate-700 dark:text-slate-200">
+              <ShieldCheck className="w-4 h-4 text-[#3B82F6] shrink-0 mt-0.5" />
+              <span>{t.passcodeAdminOnlyNotice}</span>
+            </div>
+
             <form
               onSubmit={handleCreatePasscode}
               className="p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 space-y-4"
@@ -389,7 +502,9 @@ export function AdminView() {
                           </span>
                         </div>
                         <p className="text-xs text-slate-500 dark:text-slate-400 tabular-nums">
-                          {new Date(item.createdAtMs).toLocaleDateString()}
+                          <span suppressHydrationWarning>
+                            {new Date(item.createdAtMs).toLocaleDateString()}
+                          </span>
                           <span aria-hidden="true"> · </span>
                           {memberCount} {t.adminTabPasscodeMembers}
                         </p>
@@ -407,6 +522,23 @@ export function AdminView() {
                             <Copy className="w-3.5 h-3.5" />
                           )}
                           <span>{isCopied ? t.passcodeCopiedBtn : t.passcodeCopyBtn}</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => handleCopyInviteLink(item.code)}
+                          className="min-h-[38px] px-3 py-1.5 rounded-xl bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-800 hover:bg-blue-100 dark:hover:bg-blue-950/70 text-xs font-semibold text-[#3B82F6] dark:text-blue-400 inline-flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
+                        >
+                          {copiedInviteCode === item.code ? (
+                            <Check className="w-3.5 h-3.5 text-emerald-500" />
+                          ) : (
+                            <Link2 className="w-3.5 h-3.5" />
+                          )}
+                          <span>
+                            {copiedInviteCode === item.code
+                              ? t.passcodeCopiedLinkBtn
+                              : t.passcodeCopyLinkBtn}
+                          </span>
                         </button>
 
                         <button
@@ -499,7 +631,7 @@ export function AdminView() {
                             {member.passcode}
                           </span>
                           <span aria-hidden="true"> · </span>
-                          <span className="tabular-nums">
+                          <span className="tabular-nums" suppressHydrationWarning>
                             {new Date(member.createdAtMs).toLocaleDateString()}
                           </span>
                         </p>
@@ -642,7 +774,7 @@ export function AdminView() {
                         <p className="text-xs text-slate-500 dark:text-slate-400 truncate">
                           {item.email || item.uid}
                           <span aria-hidden="true"> · </span>
-                          <span className="tabular-nums">
+                          <span className="tabular-nums" suppressHydrationWarning>
                             {new Date(item.createdAtMs).toLocaleDateString()}
                           </span>
                         </p>
@@ -654,7 +786,7 @@ export function AdminView() {
                             <button
                               type="button"
                               disabled={isBusy}
-                              onClick={() => handleAction(item, 'approved', item.role)}
+                              onClick={() => handleAction(item, 'approved', 'user')}
                               className="min-h-[40px] px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold inline-flex items-center gap-1.5 transition-colors disabled:opacity-50 cursor-pointer whitespace-nowrap"
                             >
                               <UserCheck className="w-3.5 h-3.5" />
@@ -673,26 +805,6 @@ export function AdminView() {
                               <span>{t.rejectBtn}</span>
                             </button>
                           )}
-
-                          {item.status === 'approved' && (
-                            <button
-                              type="button"
-                              disabled={isBusy}
-                              onClick={() =>
-                                handleAction(
-                                  item,
-                                  'approved',
-                                  item.role === 'admin' ? 'user' : 'admin'
-                                )
-                              }
-                              className="min-h-[40px] px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-xs font-medium text-slate-700 dark:text-slate-200 inline-flex items-center gap-1.5 transition-colors disabled:opacity-50 cursor-pointer whitespace-nowrap"
-                            >
-                              <ShieldCheck className="w-3.5 h-3.5 text-[#3B82F6]" />
-                              <span>
-                                {item.role === 'admin' ? t.removeAdminBtn : t.makeAdminBtn}
-                              </span>
-                            </button>
-                          )}
                         </div>
                       )}
                     </div>
@@ -702,7 +814,192 @@ export function AdminView() {
             )}
           </div>
         )}
+
+        {/* ============================================================ */}
+        {/* TAB 4: ALL USERS' STUDENT TASKS (ADMIN FULL VISIBILITY)      */}
+        {/* ============================================================ */}
+        {activeTab === 'studentTasks' && (
+          <div className="space-y-4">
+            <div className="p-4 rounded-xl bg-blue-50/70 dark:bg-blue-950/30 border border-blue-200/70 dark:border-blue-900/60 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <p className="text-xs text-slate-700 dark:text-slate-200 flex items-start gap-2">
+                <ShieldCheck className="w-4 h-4 text-[#3B82F6] shrink-0 mt-0.5" />
+                <span>{t.adminTasksAllDesc}</span>
+              </p>
+
+              {teacherOptions.length > 0 && (
+                <select
+                  value={selectedTeacherFilter}
+                  onChange={(e) => setSelectedTeacherFilter(e.target.value)}
+                  aria-label={t.adminTasksFilterAllTeachers}
+                  className="h-9 px-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500 shrink-0"
+                >
+                  <option value="all">{t.adminTasksFilterAllTeachers}</option>
+                  {teacherOptions.map((teacher) => (
+                    <option key={teacher.ownerId} value={teacher.ownerId}>
+                      {teacher.ownerDisplayName} ({teacher.ownerType === 'passcode' ? 'Passcode' : 'Google'})
+                    </option>
+                  ))}
+                </select>
+              )}
+            </div>
+
+            {filteredAssignments.length === 0 ? (
+              <div className="p-10 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-center text-sm text-slate-500 dark:text-slate-400">
+                {t.adminTasksEmpty}
+              </div>
+            ) : (
+              <div className="rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 divide-y divide-slate-100 dark:divide-slate-800">
+                {filteredAssignments.map((item) => {
+                  const isBusy = busyId === item.id;
+                  const isCopied = copiedTaskId === item.id;
+                  const url = buildStudentTaskUrl(item.id, shareOrigin);
+
+                  return (
+                    <div
+                      key={item.id}
+                      className="p-4 sm:p-5 flex flex-col lg:flex-row lg:items-center justify-between gap-4"
+                    >
+                      <div className="min-w-0 space-y-1.5">
+                        <div className="flex items-center gap-2.5 flex-wrap">
+                          <span className="font-display text-base font-bold text-slate-900 dark:text-white truncate">
+                            {item.title}
+                          </span>
+                          <span
+                            className={`text-xs font-semibold ${
+                              item.active
+                                ? 'text-emerald-600 dark:text-emerald-400'
+                                : 'text-amber-600 dark:text-amber-400'
+                            }`}
+                          >
+                            · {item.active ? t.tasksStatusOpen : t.tasksStatusPaused}
+                          </span>
+                        </div>
+
+                        <p className="text-xs text-slate-600 dark:text-slate-300 flex items-center gap-2 flex-wrap">
+                          <span>
+                            {t.adminTasksOwnerLabel}:{' '}
+                            <strong className="text-slate-900 dark:text-white">
+                              {item.ownerDisplayName}
+                            </strong>{' '}
+                            ({item.ownerType === 'passcode' ? 'Passcode' : 'Google'})
+                          </span>
+                          <span aria-hidden="true">·</span>
+                          <span className="tabular-nums">
+                            {t.entriesCount(item.entries.length)}
+                          </span>
+                          <span aria-hidden="true">·</span>
+                          <span className="tabular-nums" suppressHydrationWarning>
+                            {new Date(item.createdAtMs).toLocaleDateString()}
+                          </span>
+                        </p>
+
+                        <p className="font-mono text-xs text-slate-500 dark:text-slate-400 truncate max-w-[420px]">
+                          {url}
+                        </p>
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-2 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => handleCopyTaskLink(item)}
+                          className="min-h-[38px] px-3 py-1.5 rounded-xl bg-[#3B82F6] hover:bg-blue-600 text-white text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
+                        >
+                          {isCopied ? (
+                            <Check className="w-3.5 h-3.5" />
+                          ) : (
+                            <Copy className="w-3.5 h-3.5" />
+                          )}
+                          <span>{isCopied ? t.tasksCopiedLinkBtn : t.tasksCopyLinkBtn}</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => setQrModalTarget(item)}
+                          className="min-h-[38px] px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-xs font-semibold text-slate-700 dark:text-slate-200 inline-flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
+                        >
+                          <QrCode className="w-3.5 h-3.5 text-[#3B82F6]" />
+                          <span>{t.tasksShowQrBtn}</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => setSubmissionsTarget(item)}
+                          className="min-h-[38px] px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-xs font-semibold text-slate-700 dark:text-slate-200 inline-flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
+                        >
+                          <Inbox className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+                          <span>{t.tasksSubmissionsBtn}</span>
+                        </button>
+
+                        <Link
+                          href={`/task/${item.id}`}
+                          title={t.tasksOpenStudentBtn}
+                          aria-label={t.tasksOpenStudentBtn}
+                          className="min-h-[38px] min-w-[38px] px-2.5 rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 inline-flex items-center justify-center"
+                        >
+                          <ExternalLink className="w-3.5 h-3.5" />
+                        </Link>
+
+                        <button
+                          type="button"
+                          disabled={isBusy}
+                          onClick={async () => {
+                            setBusyId(item.id);
+                            try {
+                              await updateStudentAssignment(item.id, { active: !item.active });
+                            } finally {
+                              setBusyId(null);
+                            }
+                          }}
+                          title={item.active ? t.tasksPauseBtn : t.tasksResumeBtn}
+                          aria-label={item.active ? t.tasksPauseBtn : t.tasksResumeBtn}
+                          className="min-h-[38px] min-w-[38px] px-2.5 rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 inline-flex items-center justify-center cursor-pointer disabled:opacity-50"
+                        >
+                          {item.active ? (
+                            <PauseCircle className="w-4 h-4 text-amber-500" />
+                          ) : (
+                            <PlayCircle className="w-4 h-4 text-emerald-500" />
+                          )}
+                        </button>
+
+                        <button
+                          type="button"
+                          disabled={isBusy}
+                          onClick={async () => {
+                            setBusyId(item.id);
+                            try {
+                              await deleteStudentAssignment(item.id);
+                            } finally {
+                              setBusyId(null);
+                            }
+                          }}
+                          title={t.tasksDeleteBtn}
+                          aria-label={t.tasksDeleteBtn}
+                          className="min-h-[38px] min-w-[38px] px-2.5 rounded-xl border border-rose-200 dark:border-rose-900 bg-rose-50/70 dark:bg-rose-950/30 hover:bg-rose-100 text-rose-600 dark:text-rose-400 inline-flex items-center justify-center cursor-pointer disabled:opacity-50"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
       </div>
+
+      <QrShareModal
+        assignment={qrModalTarget}
+        language={settings.language}
+        onClose={() => setQrModalTarget(null)}
+      />
+
+      <AssignmentSubmissionsModal
+        assignment={submissionsTarget}
+        isAdmin={true}
+        language={settings.language}
+        onClose={() => setSubmissionsTarget(null)}
+      />
     </div>
   );
 }

@@ -17,6 +17,8 @@ import {
   Plus,
   ScanLine,
   ImageDown,
+  QrCode,
+  Copy,
 } from 'lucide-react';
 import { usePickerwel } from './PickerwelProvider';
 import { PickerWheelCanvas, type SpinResultPayload } from './PickerWheelCanvas';
@@ -25,6 +27,7 @@ import { WinnerModal } from './WinnerModal';
 import { QuickStopwatchBar } from './QuickStopwatchBar';
 import { QuickGroupSplitPanel } from './QuickGroupSplitPanel';
 import { ApprovalGateBanner } from './ApprovalGateBanner';
+import { QuickQrModal } from './QuickQrModal';
 import { WHEEL_PALETTES, type PaletteId } from '@/lib/palettes';
 import { exportWheelSnapshotPng } from '@/lib/wheel-snapshot';
 import { playWinSound, triggerHaptic } from '@/lib/sound';
@@ -67,9 +70,28 @@ export function PickerwelApp() {
   const [mobileSheetOpen, setMobileSheetOpen] = useState(false);
   const [exportingPng, setExportingPng] = useState(false);
   const [pngSaved, setPngSaved] = useState(false);
+  const [appLinkCopied, setAppLinkCopied] = useState(false);
+  const [quickQrOpen, setQuickQrOpen] = useState(false);
   const sheetTouchStartY = useRef<number | null>(null);
   const quickGroupsRef = useRef<HTMLDivElement | null>(null);
   const pngTimerRef = useRef<number | null>(null);
+
+  const handleCopyAppLink = useCallback(async () => {
+    if (typeof window === 'undefined') return;
+    const url = window.location.origin;
+    try {
+      await navigator.clipboard.writeText(url);
+    } catch {
+      const input = document.createElement('input');
+      input.value = url;
+      document.body.appendChild(input);
+      input.select();
+      document.execCommand('copy');
+      input.remove();
+    }
+    setAppLinkCopied(true);
+    window.setTimeout(() => setAppLinkCopied(false), 1800);
+  }, []);
 
   const handleExportWheelPng = useCallback(async () => {
     if (activeWheel.entries.length === 0 || exportingPng) return;
@@ -252,6 +274,50 @@ export function PickerwelApp() {
             >
               <ScanLine className="w-4 h-4 shrink-0" />
               <span>{t.scanNamesBtn}</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={handleCopyAppLink}
+              title={t.quickAppLinkTitle}
+              aria-label={t.quickCopyLinkBtn}
+              className="min-h-[40px] px-3 rounded-xl border border-indigo-200 dark:border-indigo-800 bg-indigo-50/80 dark:bg-indigo-950/40 hover:bg-indigo-100 dark:hover:bg-indigo-950/70 text-xs font-semibold text-indigo-700 dark:text-indigo-300 inline-flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap shrink-0"
+            >
+              {appLinkCopied ? (
+                <>
+                  <Check className="w-4 h-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
+                  <span className="text-emerald-700 dark:text-emerald-300">
+                    {t.tasksCopiedLinkBtn}
+                  </span>
+                </>
+              ) : (
+                <>
+                  <Copy className="w-4 h-4 shrink-0" />
+                  <span>{t.quickCopyLinkBtn}</span>
+                </>
+              )}
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setQuickQrOpen(true)}
+              title={t.quickAppLinkTitle}
+              aria-label={t.quickShowQrBtn}
+              className="min-h-[40px] px-3 rounded-xl border border-violet-200 dark:border-violet-800 bg-violet-50/80 dark:bg-violet-950/40 hover:bg-violet-100 dark:hover:bg-violet-950/70 text-xs font-semibold text-violet-700 dark:text-violet-300 inline-flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap shrink-0"
+            >
+              <QrCode className="w-4 h-4 shrink-0" />
+              <span>{t.quickShowQrBtn}</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveNav('tasks')}
+              title={t.tasksPageTitle}
+              aria-label={t.tasksPageTitle}
+              className="min-h-[40px] px-3 rounded-xl border border-blue-200 dark:border-blue-800 bg-blue-50/80 dark:bg-blue-950/40 hover:bg-blue-100 dark:hover:bg-blue-950/70 text-xs font-semibold text-[#3B82F6] dark:text-blue-300 inline-flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap shrink-0"
+            >
+              <QrCode className="w-4 h-4 shrink-0" />
+              <span>{t.tasksNavShort}</span>
             </button>
 
             <button
@@ -678,6 +744,14 @@ export function PickerwelApp() {
         onRemoveWinner={handleRemoveWinner}
         onKeepAndSpinAgain={handleKeepAndSpinAgain}
         onClose={handleCloseWinnerModal}
+      />
+
+      {/* Quick Share QR-Code Projector Modal */}
+      <QuickQrModal
+        isOpen={quickQrOpen}
+        initialPath="/"
+        language={settings.language}
+        onClose={() => setQuickQrOpen(false)}
       />
     </div>
   );

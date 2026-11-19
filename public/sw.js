@@ -1,9 +1,10 @@
-const CACHE_NAME = 'pickerwel-offline-v4';
+const CACHE_NAME = 'pickerwel-offline-v5';
 const APP_SHELL_ASSETS = [
   '/',
   '/wheels',
   '/templates',
   '/groups',
+  '/tasks',
   '/games',
   '/stopwatch',
   '/history',

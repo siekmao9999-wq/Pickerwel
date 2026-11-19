@@ -70,7 +70,10 @@ export function HistoryView() {
                 </div>
 
                 <div className="flex items-center gap-3 shrink-0">
-                  <time className="text-xs text-slate-500 dark:text-slate-400 tabular-nums">
+                  <time
+                    className="text-xs text-slate-500 dark:text-slate-400 tabular-nums"
+                    suppressHydrationWarning
+                  >
                     {new Date(item.spunAtMs).toLocaleString([], {
                       month: 'short',
                       day: 'numeric',

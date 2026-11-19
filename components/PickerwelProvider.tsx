@@ -43,6 +43,8 @@ import {
   deleteAdminPasscode,
   updatePasscodeMemberStatus,
   deletePasscodeMember,
+  BOOTSTRAP_ADMIN_EMAIL,
+  isValidPasscodeFormat,
   DEFAULT_ADMIN_DISPLAY_NAME,
   subscribePublicAppConfig,
   updatePublicAdminName,
@@ -64,6 +66,7 @@ export type NavSection =
   | 'wheels'
   | 'templates'
   | 'groups'
+  | 'tasks'
   | 'games'
   | 'stopwatch'
   | 'history'
@@ -76,6 +79,7 @@ export const NAV_ROUTES: Record<NavSection, string> = {
   wheels: '/wheels',
   templates: '/templates',
   groups: '/groups',
+  tasks: '/tasks',
   games: '/games',
   stopwatch: '/stopwatch',
   history: '/history',
@@ -89,6 +93,7 @@ function navFromPathname(pathname: string | null): NavSection {
   if (pathname.startsWith('/wheels')) return 'wheels';
   if (pathname.startsWith('/templates')) return 'templates';
   if (pathname.startsWith('/groups')) return 'groups';
+  if (pathname.startsWith('/tasks')) return 'tasks';
   if (pathname.startsWith('/games')) return 'games';
   if (pathname.startsWith('/stopwatch')) return 'stopwatch';
   if (pathname.startsWith('/history')) return 'history';
@@ -135,8 +140,10 @@ export interface PasscodeSession {
   passcodeActive: boolean;
 }
 
+const STARTER_WHEEL_EPOCH_MS = 1700000000000;
+
 function createStarterLocalWheels(): SavedWheel[] {
-  const now = Date.now();
+  const now = STARTER_WHEEL_EPOCH_MS;
   return [
     {
       id: 'quick_start_wheel',
@@ -187,6 +194,7 @@ interface PickerwelContextValue {
   authLoading: boolean;
   authError: string | null;
   authModalOpen: boolean;
+  prefillPasscode: string;
   openAuthModal: () => void;
   closeAuthModal: () => void;
   registerWithPasscode: (name: string, passcode: string) => Promise<void>;
@@ -239,6 +247,7 @@ export function PickerwelProvider({ children }: { children: React.ReactNode }) {
   const [authLoading, setAuthLoading] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
   const [authModalOpen, setAuthModalOpen] = useState(false);
+  const [prefillPasscode, setPrefillPasscode] = useState('');
 
   const pathname = usePathname();
   const router = useRouter();
@@ -463,7 +472,32 @@ export function PickerwelProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const isApprovedCloudUser = Boolean(user && userProfile?.status === 'approved');
+  const isPrimaryAdmin = Boolean(
+    user &&
+      user.email?.toLowerCase() === BOOTSTRAP_ADMIN_EMAIL &&
+      userProfile?.role === 'admin' &&
+      userProfile?.status === 'approved'
+  );
   const isAdmin = Boolean(user && userProfile?.role === 'admin' && userProfile?.status === 'approved');
+
+  // Auto-open registration modal with pre-filled Admin Passcode when visiting /?code=XXXX
+  useEffect(() => {
+    if (!hydrated || !authReady) return;
+    if (user || passcodeSession) return;
+    if (typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search);
+    const rawCode = params.get('code')?.trim().toUpperCase() || '';
+    if (rawCode && isValidPasscodeFormat(rawCode)) {
+      queueMicrotask(() => {
+        setPrefillPasscode(rawCode);
+        setAuthModalOpen(true);
+      });
+      params.delete('code');
+      const nextSearch = params.toString();
+      const nextUrl = `${window.location.pathname}${nextSearch ? `?${nextSearch}` : ''}${window.location.hash}`;
+      window.history.replaceState({}, '', nextUrl);
+    }
+  }, [hydrated, authReady, user, passcodeSession]);
 
   // Subscribe to Wheels & History ONLY when user is approved
   useEffect(() => {
@@ -527,9 +561,16 @@ export function PickerwelProvider({ children }: { children: React.ReactNode }) {
     const unsubAll = subscribeAllUsers((users) => {
       setAllUsers(users);
     });
-    const unsubCodes = subscribeAdminPasscodes((codes) => {
-      setAdminPasscodes(codes);
-    });
+    const unsubCodes = isPrimaryAdmin
+      ? subscribeAdminPasscodes((codes) => {
+          setAdminPasscodes(codes);
+        })
+      : () => {};
+    if (!isPrimaryAdmin) {
+      queueMicrotask(() => {
+        setAdminPasscodes([]);
+      });
+    }
     const unsubMembers = subscribeAllPasscodeMembers((members) => {
       setPasscodeMembers(members);
     });
@@ -538,7 +579,7 @@ export function PickerwelProvider({ children }: { children: React.ReactNode }) {
       unsubCodes();
       unsubMembers();
     };
-  }, [isAdmin]);
+  }, [isAdmin, isPrimaryAdmin]);
 
   const wheels = isApprovedCloudUser && cloudWheels.length > 0 ? cloudWheels : localWheels;
   const history = isApprovedCloudUser ? cloudHistory : localHistory;
@@ -611,35 +652,36 @@ export function PickerwelProvider({ children }: { children: React.ReactNode }) {
   }, [activeNav, localWheels, setActiveNav]);
 
   const reviewUser = useCallback(
-    async (targetUid: string, status: AccountStatus, role: AccountRole) => {
-      if (!user || !isAdmin) return;
-      await reviewUserRegistration(targetUid, status, role, user.uid);
+    async (targetUid: string, status: AccountStatus, _role: AccountRole) => {
+      void _role;
+      if (!user || !isPrimaryAdmin) return;
+      await reviewUserRegistration(targetUid, status, 'user', user.uid);
     },
-    [isAdmin, user]
+    [isPrimaryAdmin, user]
   );
 
   const createPasscode = useCallback(
     async (code: string, label: string) => {
-      if (!user || !isAdmin) return;
+      if (!user || !isPrimaryAdmin) return;
       await createAdminPasscode(user.uid, code, label);
     },
-    [isAdmin, user]
+    [isPrimaryAdmin, user]
   );
 
   const togglePasscode = useCallback(
     async (code: string, active: boolean) => {
-      if (!user || !isAdmin) return;
+      if (!user || !isPrimaryAdmin) return;
       await toggleAdminPasscodeActive(code, active);
     },
-    [isAdmin, user]
+    [isPrimaryAdmin, user]
   );
 
   const removePasscode = useCallback(
     async (code: string) => {
-      if (!user || !isAdmin) return;
+      if (!user || !isPrimaryAdmin) return;
       await deleteAdminPasscode(code);
     },
-    [isAdmin, user]
+    [isPrimaryAdmin, user]
   );
 
   const reviewPasscodeMember = useCallback(
@@ -911,6 +953,7 @@ export function PickerwelProvider({ children }: { children: React.ReactNode }) {
         authLoading,
         authError,
         authModalOpen,
+        prefillPasscode,
         openAuthModal,
         closeAuthModal,
         registerWithPasscode,

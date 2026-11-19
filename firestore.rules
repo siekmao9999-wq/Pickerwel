@@ -32,9 +32,13 @@ service cloud.firestore {
       return isVerifiedUser() && request.auth.uid == userId;
     }
 
+    function isPrimaryAdmin() {
+      return isVerifiedUser() && request.auth.token.email == 'siekmao9999@gmail.com';
+    }
+
     function isAdmin() {
-      return isVerifiedUser() && (
-        request.auth.token.email == 'siekmao9999@gmail.com' ||
+      return isPrimaryAdmin() || (
+        isVerifiedUser() &&
         exists(/databases/$(database)/documents/admins/$(request.auth.uid))
       );
     }
@@ -149,6 +153,13 @@ service cloud.firestore {
         memberId.matches('^pm_[a-zA-Z0-9_\\-]+$');
     }
 
+    function isValidAssignmentId(assignmentId) {
+      return assignmentId is string &&
+        assignmentId.size() >= 16 &&
+        assignmentId.size() <= 128 &&
+        assignmentId.matches('^asgn_[a-zA-Z0-9_\\-]+$');
+    }
+
     function isValidPasscode(data, codeId) {
       return data.keys().hasAll(['code', 'label', 'active', 'createdBy', 'createdAt', 'updatedAt']) &&
         data.keys().hasOnly(['code', 'label', 'active', 'createdBy', 'createdAt', 'updatedAt']) &&
@@ -180,16 +191,69 @@ service cloud.firestore {
         data.updatedAt is timestamp;
     }
 
-    // Admin Registry Collection
+    function isValidStudentAssignment(data, assignmentId) {
+      return data.keys().hasAll([
+          'id', 'ownerId', 'ownerType', 'ownerDisplayName',
+          'title', 'instructions', 'entries', 'paletteId',
+          'allowWheelSpin', 'active', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'id', 'ownerId', 'ownerType', 'ownerDisplayName',
+          'title', 'instructions', 'entries', 'paletteId',
+          'allowWheelSpin', 'active', 'createdAt', 'updatedAt'
+        ]) &&
+        isValidAssignmentId(data.id) &&
+        data.id == assignmentId &&
+        data.ownerType in ['google', 'passcode'] &&
+        (
+          (data.ownerType == 'google' && isValidId(data.ownerId)) ||
+          (data.ownerType == 'passcode' && isValidMemberId(data.ownerId))
+        ) &&
+        data.ownerDisplayName is string && data.ownerDisplayName.size() >= 1 && data.ownerDisplayName.size() <= 80 &&
+        data.title is string && data.title.size() >= 1 && data.title.size() <= 120 &&
+        data.instructions is string && data.instructions.size() <= 2000 &&
+        data.entries is list &&
+        data.entries.size() <= 200 &&
+        (data.entries.size() == 0 || (data.entries[0] is string && data.entries[0].size() <= 120)) &&
+        data.paletteId in ['vibrant', 'classroom', 'sunset', 'ocean'] &&
+        data.allowWheelSpin is bool &&
+        data.active is bool &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidStudentSubmission(data, assignmentId, submissionId) {
+      return data.keys().hasAll([
+          'id', 'assignmentId', 'ownerId', 'studentName',
+          'groupLabel', 'drawnItem', 'answerText', 'status', 'submittedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'id', 'assignmentId', 'ownerId', 'studentName',
+          'groupLabel', 'drawnItem', 'answerText', 'status', 'submittedAt'
+        ]) &&
+        isValidId(data.id) &&
+        data.id == submissionId &&
+        isValidAssignmentId(data.assignmentId) &&
+        data.assignmentId == assignmentId &&
+        isValidId(data.ownerId) &&
+        data.studentName is string && data.studentName.size() >= 1 && data.studentName.size() <= 80 &&
+        data.groupLabel is string && data.groupLabel.size() <= 60 &&
+        data.drawnItem is string && data.drawnItem.size() <= 120 &&
+        data.answerText is string && data.answerText.size() >= 1 && data.answerText.size() <= 2000 &&
+        data.status in ['submitted', 'reviewed'] &&
+        data.submittedAt is timestamp;
+    }
+
+    // Admin Registry Collection (Primary Admin Only)
     match /admins/{adminUid} {
       allow get: if isValidId(adminUid) && (isOwner(adminUid) || isAdmin());
-      allow list: if isAdmin();
+      allow list: if isPrimaryAdmin();
       allow create: if isValidId(adminUid) &&
-        isAdmin() &&
+        isPrimaryAdmin() &&
         isValidAdminMember(incoming(), adminUid) &&
         incoming().createdAt == request.time;
       allow update: if false;
-      allow delete: if isValidId(adminUid) && isAdmin() && adminUid != request.auth.uid;
+      allow delete: if isValidId(adminUid) && isPrimaryAdmin() && adminUid != request.auth.uid;
     }
 
     // User Profile Collection (Owner + Admin Approval Gate)
@@ -214,7 +278,8 @@ service cloud.firestore {
         incoming().updatedAt == request.time &&
         (
           (
-            isAdmin() &&
+            isPrimaryAdmin() &&
+            incoming().role == 'user' &&
             incoming().reviewedAt == request.time &&
             incoming().diff(existing()).affectedKeys().hasOnly([
               'status', 'role', 'reviewedAt', 'reviewedBy', 'updatedAt'
@@ -285,25 +350,25 @@ service cloud.firestore {
       }
     }
 
-    // Admin-Issued Registration Passcodes (No PII)
+    // Admin-Issued Registration Passcodes (Created & Managed Strictly by Primary Admin)
     match /passcodes/{codeId} {
       allow get: if isValidPasscodeId(codeId);
-      allow list: if isAdmin();
+      allow list: if isPrimaryAdmin();
       allow create: if isValidPasscodeId(codeId) &&
-        isAdmin() &&
+        isPrimaryAdmin() &&
         isValidPasscode(incoming(), codeId) &&
         incoming().createdBy == request.auth.uid &&
         incoming().createdAt == request.time &&
         incoming().updatedAt == request.time;
       allow update: if isValidPasscodeId(codeId) &&
-        isAdmin() &&
+        isPrimaryAdmin() &&
         isValidPasscode(incoming(), codeId) &&
         incoming().code == existing().code &&
         incoming().createdBy == existing().createdBy &&
         incoming().createdAt == existing().createdAt &&
         incoming().updatedAt == request.time &&
         incoming().diff(existing()).affectedKeys().hasOnly(['label', 'active', 'updatedAt']);
-      allow delete: if isValidPasscodeId(codeId) && isAdmin();
+      allow delete: if isValidPasscodeId(codeId) && isPrimaryAdmin();
     }
 
     // Email-less Passcode Member Registrations
@@ -338,6 +403,92 @@ service cloud.firestore {
         isValidPublicConfig(incoming()) &&
         incoming().updatedAt == request.time;
       allow delete: if false;
+    }
+
+    // Per-User Student Practice Assignments (Unique Link & QR-Code, Owner-Isolated, Admin Full View)
+    match /assignments/{assignmentId} {
+      allow get: if isValidAssignmentId(assignmentId);
+      allow list: if isAdmin() || (isVerifiedUser() && resource.data.ownerId == request.auth.uid);
+      allow create: if isValidAssignmentId(assignmentId) &&
+        isValidStudentAssignment(incoming(), assignmentId) &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        (
+          (
+            isVerifiedUser() &&
+            incoming().ownerType == 'google' &&
+            incoming().ownerId == request.auth.uid &&
+            (isAdmin() || isApprovedUser(request.auth.uid))
+          ) ||
+          (
+            incoming().ownerType == 'passcode' &&
+            isValidMemberId(incoming().ownerId) &&
+            exists(/databases/$(database)/documents/passcodeMembers/$(incoming().ownerId)) &&
+            get(/databases/$(database)/documents/passcodeMembers/$(incoming().ownerId)).data.status == 'approved'
+          )
+        );
+      allow update: if isValidAssignmentId(assignmentId) &&
+        isValidStudentAssignment(incoming(), assignmentId) &&
+        incoming().id == existing().id &&
+        incoming().ownerId == existing().ownerId &&
+        incoming().ownerType == existing().ownerType &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        incoming().diff(existing()).affectedKeys().hasOnly([
+          'title', 'instructions', 'entries', 'paletteId', 'allowWheelSpin', 'active', 'updatedAt'
+        ]) &&
+        (
+          isAdmin() ||
+          (
+            existing().ownerType == 'google' &&
+            isOwner(existing().ownerId) &&
+            isApprovedUser(existing().ownerId)
+          )
+        );
+      allow delete: if isValidAssignmentId(assignmentId) &&
+        (
+          isAdmin() ||
+          (
+            existing().ownerType == 'google' &&
+            isOwner(existing().ownerId) &&
+            isApprovedUser(existing().ownerId)
+          )
+        );
+
+      // Student Work Submissions (Owner + Admin Only Read; Active Assignment Student Create)
+      match /submissions/{submissionId} {
+        allow get: if isValidAssignmentId(assignmentId) &&
+          isValidId(submissionId) &&
+          (isAdmin() || (isVerifiedUser() && existing().ownerId == request.auth.uid));
+        allow list: if isValidAssignmentId(assignmentId) &&
+          (isAdmin() || (isVerifiedUser() && resource.data.ownerId == request.auth.uid));
+        allow create: if isValidAssignmentId(assignmentId) &&
+          isValidId(submissionId) &&
+          isValidStudentSubmission(incoming(), assignmentId, submissionId) &&
+          incoming().status == 'submitted' &&
+          incoming().submittedAt == request.time &&
+          exists(/databases/$(database)/documents/assignments/$(assignmentId)) &&
+          get(/databases/$(database)/documents/assignments/$(assignmentId)).data.active == true &&
+          incoming().ownerId == get(/databases/$(database)/documents/assignments/$(assignmentId)).data.ownerId;
+        allow update: if isValidAssignmentId(assignmentId) &&
+          isValidId(submissionId) &&
+          isValidStudentSubmission(incoming(), assignmentId, submissionId) &&
+          incoming().id == existing().id &&
+          incoming().assignmentId == existing().assignmentId &&
+          incoming().ownerId == existing().ownerId &&
+          incoming().submittedAt == existing().submittedAt &&
+          incoming().diff(existing()).affectedKeys().hasOnly(['status']) &&
+          (
+            isAdmin() ||
+            (isVerifiedUser() && existing().ownerId == request.auth.uid && isApprovedUser(request.auth.uid))
+          );
+        allow delete: if isValidAssignmentId(assignmentId) &&
+          isValidId(submissionId) &&
+          (
+            isAdmin() ||
+            (isVerifiedUser() && existing().ownerId == request.auth.uid && isApprovedUser(request.auth.uid))
+          );
+      }
     }
   }
 }

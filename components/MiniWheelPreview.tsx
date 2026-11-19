@@ -34,10 +34,14 @@ export function MiniWheelPreview({
         const endDeg = (idx + 1) * sliceAngle;
         const startRad = ((startDeg - 90) * Math.PI) / 180;
         const endRad = ((endDeg - 90) * Math.PI) / 180;
-        const x1 = cx + r * Math.cos(startRad);
-        const y1 = cy + r * Math.sin(startRad);
-        const x2 = cx + r * Math.cos(endRad);
-        const y2 = cy + r * Math.sin(endRad);
+        const round2 = (n: number) => {
+          const rVal = Math.round(n * 100) / 100;
+          return Object.is(rVal, -0) ? 0 : rVal;
+        };
+        const x1 = round2(cx + r * Math.cos(startRad));
+        const y1 = round2(cy + r * Math.sin(startRad));
+        const x2 = round2(cx + r * Math.cos(endRad));
+        const y2 = round2(cy + r * Math.sin(endRad));
         const largeArc = sliceAngle > 180 ? 1 : 0;
         return (
           <path

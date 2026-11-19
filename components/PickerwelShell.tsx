@@ -1,6 +1,8 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
+import { usePathname } from 'next/navigation';
+import Link from 'next/link';
 import {
   Home,
   LayoutGrid,
@@ -20,6 +22,7 @@ import {
   Gamepad2,
   Users,
   Github,
+  QrCode,
 } from 'lucide-react';
 import { usePickerwel, type NavSection } from './PickerwelProvider';
 import { AuthModal } from './AuthModal';
@@ -46,6 +49,8 @@ export function PickerwelShell({ children }: { children: React.ReactNode }) {
     updateSettings,
   } = usePickerwel();
 
+  const pathname = usePathname();
+  const isStudentTaskRoute = Boolean(pathname && pathname.startsWith('/task/'));
   const t = COPY[settings.language];
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [mobileProfileOpen, setMobileProfileOpen] = useState(false);
@@ -85,6 +90,7 @@ export function PickerwelShell({ children }: { children: React.ReactNode }) {
     { id: 'wheels', label: t.navMyWheels, icon: LayoutGrid },
     { id: 'templates', label: t.navTemplates, icon: Sparkles },
     { id: 'groups', label: t.navGroups, icon: Users },
+    { id: 'tasks', label: t.navTasks, icon: QrCode },
     { id: 'games', label: t.navGames, icon: Gamepad2 },
     { id: 'stopwatch', label: t.navStopwatch, icon: Watch },
     { id: 'history', label: t.navHistory, icon: History },
@@ -103,6 +109,52 @@ export function PickerwelShell({ children }: { children: React.ReactNode }) {
   ];
 
   const userDisplayName = currentDisplayName;
+
+  if (isStudentTaskRoute) {
+    return (
+      <div className="min-h-[100dvh] flex flex-col bg-[#F8FAFC] dark:bg-[#0F172A] text-slate-900 dark:text-slate-100 transition-colors">
+        <header className="sticky top-0 z-30 px-4 sm:px-6 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border-b border-slate-200 dark:border-slate-800">
+          <div className="max-w-5xl mx-auto h-14 flex items-center justify-between gap-3">
+            <Link href="/" className="flex items-center gap-2 min-w-0">
+              <span className="font-latin text-lg font-bold tracking-tight text-slate-900 dark:text-white whitespace-nowrap">
+                {t.brand}
+              </span>
+              <span className="text-xs text-slate-500 dark:text-slate-400 truncate hidden sm:inline">
+                · {t.tasksStudentHeaderBadge}
+              </span>
+            </Link>
+
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={() =>
+                  updateSettings({ language: settings.language === 'km' ? 'en' : 'km' })
+                }
+                className="min-h-[36px] px-2.5 rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-xs font-semibold text-slate-700 dark:text-slate-200 cursor-pointer whitespace-nowrap"
+              >
+                {settings.language === 'km' ? 'EN' : 'ខ្មែរ'}
+              </button>
+              <button
+                type="button"
+                onClick={() =>
+                  updateSettings({ theme: settings.theme === 'dark' ? 'light' : 'dark' })
+                }
+                aria-label={settings.theme === 'dark' ? t.lightMode : t.darkMode}
+                className="min-h-[36px] min-w-[36px] rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center justify-center text-slate-700 dark:text-slate-200 cursor-pointer"
+              >
+                {settings.theme === 'dark' ? (
+                  <Sun className="w-4 h-4 text-amber-400" />
+                ) : (
+                  <Moon className="w-4 h-4 text-indigo-500" />
+                )}
+              </button>
+            </div>
+          </div>
+        </header>
+        {children}
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-[100dvh] md:h-[100dvh] flex flex-col md:flex-row md:overflow-hidden bg-[#F8FAFC] dark:bg-[#0F172A] text-slate-900 dark:text-slate-100 transition-colors">

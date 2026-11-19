@@ -17,6 +17,7 @@ import { isValidPasscodeFormat } from '@/lib/firestore-service';
 export function AuthModal() {
   const {
     authModalOpen,
+    prefillPasscode,
     closeAuthModal,
     registerWithPasscode,
     signInWithGoogle,
@@ -28,12 +29,15 @@ export function AuthModal() {
 
   const t = COPY[settings.language];
   const [name, setName] = useState('');
-  const [passcode, setPasscode] = useState('');
+  const [passcodeDraft, setPasscodeDraft] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
+  const passcode = passcodeDraft ?? prefillPasscode;
+
   const handleClose = () => {
     setFormError(null);
+    setPasscodeDraft(null);
     closeAuthModal();
   };
 
@@ -71,7 +75,7 @@ export function AuthModal() {
     try {
       await registerWithPasscode(trimmedName, trimmedCode);
       setName('');
-      setPasscode('');
+      setPasscodeDraft('');
       handleClose();
     } catch (err) {
       const code = err instanceof Error ? err.message : '';
@@ -175,7 +179,7 @@ export function AuthModal() {
                 id="passcode-reg-code"
                 type="text"
                 value={passcode}
-                onChange={(e) => setPasscode(e.target.value.toUpperCase())}
+                onChange={(e) => setPasscodeDraft(e.target.value.toUpperCase())}
                 maxLength={32}
                 autoCapitalize="characters"
                 autoComplete="off"
@@ -184,6 +188,10 @@ export function AuthModal() {
                 className="w-full h-11 pl-10 pr-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 font-mono text-sm tracking-wider uppercase text-slate-900 dark:text-white placeholder:text-slate-400 placeholder:font-sans placeholder:tracking-normal placeholder:normal-case focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white dark:focus:bg-slate-900 transition-colors"
               />
             </div>
+            <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed flex items-start gap-1.5 pt-0.5">
+              <ShieldCheck className="w-3.5 h-3.5 text-[#3B82F6] shrink-0 mt-0.5" />
+              <span>{t.authAdminOnlyCodeNote(appAdminName)}</span>
+            </p>
           </div>
 
           {(formError || authError) && (

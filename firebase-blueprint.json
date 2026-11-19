@@ -366,6 +366,161 @@
         }
       },
       "required": ["adminName", "updatedAt"]
+    },
+    "StudentAssignment": {
+      "title": "StudentAssignment",
+      "description": "A per-user student practice assignment shared via unique link and QR code. Private to its owner and visible to Admins.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 16,
+          "maxLength": 128,
+          "pattern": "^asgn_[a-zA-Z0-9_\\-]+$",
+          "description": "Unguessable assignment identifier used in share link and QR code."
+        },
+        "ownerId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "UID of the Google user or memberId of the Passcode user who created this assignment."
+        },
+        "ownerType": {
+          "type": "string",
+          "enum": ["google", "passcode"],
+          "description": "Account type of the assignment owner."
+        },
+        "ownerDisplayName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80,
+          "description": "Teacher display name shown on the student practice page (no email/PII)."
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120,
+          "description": "Title of the student practice task."
+        },
+        "instructions": {
+          "type": "string",
+          "maxLength": 2000,
+          "description": "Task instructions or practice prompts for students."
+        },
+        "entries": {
+          "type": "array",
+          "description": "Optional wheel entries (topics, questions, or names) students can spin during practice (max 200)."
+        },
+        "paletteId": {
+          "type": "string",
+          "enum": ["vibrant", "classroom", "sunset", "ocean"],
+          "description": "Color palette identifier for the optional practice wheel."
+        },
+        "allowWheelSpin": {
+          "type": "boolean",
+          "description": "Whether students can spin the embedded wheel to receive a practice topic."
+        },
+        "active": {
+          "type": "boolean",
+          "description": "Whether the assignment currently accepts student practice submissions."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server creation timestamp."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server last update timestamp."
+        }
+      },
+      "required": [
+        "id",
+        "ownerId",
+        "ownerType",
+        "ownerDisplayName",
+        "title",
+        "instructions",
+        "entries",
+        "paletteId",
+        "allowWheelSpin",
+        "active",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "StudentSubmission": {
+      "title": "StudentSubmission",
+      "description": "A student work submission attached to a specific StudentAssignment, readable only by the assignment owner and Admins.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Unique submission document identifier."
+        },
+        "assignmentId": {
+          "type": "string",
+          "minLength": 16,
+          "maxLength": 128,
+          "pattern": "^asgn_[a-zA-Z0-9_\\-]+$",
+          "description": "Parent StudentAssignment identifier."
+        },
+        "ownerId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Denormalized ownerId from the parent StudentAssignment for O(1) owner-scoped listing."
+        },
+        "studentName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80,
+          "description": "Name of the student submitting work."
+        },
+        "groupLabel": {
+          "type": "string",
+          "maxLength": 60,
+          "description": "Optional class, seat, or group label."
+        },
+        "drawnItem": {
+          "type": "string",
+          "maxLength": 120,
+          "description": "Optional topic or item drawn from the practice wheel."
+        },
+        "answerText": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2000,
+          "description": "Student's practice answer or completed work notes."
+        },
+        "status": {
+          "type": "string",
+          "enum": ["submitted", "reviewed"],
+          "description": "Review status managed by the teacher or administrator."
+        },
+        "submittedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server submission timestamp."
+        }
+      },
+      "required": [
+        "id",
+        "assignmentId",
+        "ownerId",
+        "studentName",
+        "groupLabel",
+        "drawnItem",
+        "answerText",
+        "status",
+        "submittedAt"
+      ]
     }
   },
   "firestore": {
@@ -396,6 +551,14 @@
     "/users/{userId}/spinResults/{resultId}": {
       "schema": { "$ref": "#/entities/SpinResult" },
       "description": "Stores spin history records belonging to an approved user."
+    },
+    "/assignments/{assignmentId}": {
+      "schema": { "$ref": "#/entities/StudentAssignment" },
+      "description": "Stores per-user student practice assignments with unique unguessable share links and QR codes."
+    },
+    "/assignments/{assignmentId}/submissions/{submissionId}": {
+      "schema": { "$ref": "#/entities/StudentSubmission" },
+      "description": "Stores student work submissions for an assignment, strictly isolated to its owner and Admins."
     }
   }
 }

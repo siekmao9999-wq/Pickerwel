@@ -40,11 +40,16 @@ interface PickerWheelCanvasProps {
   spinTriggerCount?: number;
 }
 
+function roundCoord(value: number): number {
+  const rounded = Math.round(value * 100) / 100;
+  return Object.is(rounded, -0) ? 0 : rounded;
+}
+
 function polarToCartesian(cx: number, cy: number, r: number, angleDeg: number) {
   const rad = ((angleDeg - 90) * Math.PI) / 180;
   return {
-    x: cx + r * Math.cos(rad),
-    y: cy + r * Math.sin(rad),
+    x: roundCoord(cx + r * Math.cos(rad)),
+    y: roundCoord(cy + r * Math.sin(rad)),
   };
 }
 
@@ -495,12 +500,12 @@ export function PickerWheelCanvas({
               </text>
             </g>
           ) : (
-            <g transform={`rotate(${rotation} ${cx} ${cy})`}>
+            <g transform={`rotate(${roundCoord(rotation)} ${cx} ${cy})`}>
               {count === 1 ? (
                 <g>
                   <circle cx={cx} cy={cy} r={radius} fill={colors[0]} />
                   <text
-                    x={cx + radius * 0.52}
+                    x={roundCoord(cx + radius * 0.52)}
                     y={cy}
                     textAnchor="middle"
                     dominantBaseline="central"
@@ -547,9 +552,9 @@ export function PickerWheelCanvas({
                         strokeWidth={count > 40 ? '1' : '2.2'}
                       />
                       {count <= 60 && (
-                        <g transform={`rotate(${midDeg - 90} ${cx} ${cy})`}>
+                        <g transform={`rotate(${roundCoord(midDeg - 90)} ${cx} ${cy})`}>
                           <text
-                            x={cx + radius * 0.62}
+                            x={roundCoord(cx + radius * 0.62)}
                             y={cy}
                             textAnchor="middle"
                             dominantBaseline="central"

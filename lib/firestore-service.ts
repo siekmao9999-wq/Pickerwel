@@ -8,6 +8,7 @@ import {
   getDocs,
   onSnapshot,
   query,
+  where,
   orderBy,
   limit,
   serverTimestamp,
@@ -18,6 +19,7 @@ import { auth, db } from './firebase';
 import type { PaletteId } from './palettes';
 import type { Language } from './i18n';
 import { WHEEL_TEMPLATES } from './templates';
+import { getShareOrigin } from './share-origin';
 
 export const BOOTSTRAP_ADMIN_EMAIL = 'siekmao9999@gmail.com';
 
@@ -912,5 +914,377 @@ export async function updatePublicAdminName(rawName: string): Promise<string> {
     handleFirestoreError(error, OperationType.WRITE, path);
   }
 }
+
+// ============================================================================
+// Per-User Student Practice Assignments (Unique Link & QR-Code, Owner-Isolated)
+// ============================================================================
+
+export type AssignmentOwnerType = 'google' | 'passcode';
+
+export interface StudentAssignment {
+  id: string;
+  ownerId: string;
+  ownerType: AssignmentOwnerType;
+  ownerDisplayName: string;
+  title: string;
+  instructions: string;
+  entries: string[];
+  paletteId: PaletteId;
+  allowWheelSpin: boolean;
+  active: boolean;
+  createdAtMs: number;
+  updatedAtMs: number;
+}
+
+export interface StudentSubmission {
+  id: string;
+  assignmentId: string;
+  ownerId: string;
+  studentName: string;
+  groupLabel: string;
+  drawnItem: string;
+  answerText: string;
+  status: 'submitted' | 'reviewed';
+  submittedAtMs: number;
+}
+
+function randomToken(length: number): string {
+  const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+  let out = '';
+  if (typeof crypto !== 'undefined' && typeof crypto.getRandomValues === 'function') {
+    const bytes = new Uint8Array(length);
+    crypto.getRandomValues(bytes);
+    for (let i = 0; i < length; i++) {
+      out += chars[bytes[i] % chars.length];
+    }
+    return out;
+  }
+  for (let i = 0; i < length; i++) {
+    out += chars[Math.floor(Math.random() * chars.length)];
+  }
+  return out;
+}
+
+export function generateAssignmentId(): string {
+  return `asgn_${Date.now().toString(36)}_${randomToken(16)}`;
+}
+
+export function generateSubmissionId(): string {
+  return `sub_${Date.now().toString(36)}_${randomToken(12)}`;
+}
+
+export function buildStudentTaskUrl(
+  assignmentId: string,
+  originOverride?: string
+): string {
+  const safeId = sanitizeId(assignmentId);
+  const origin =
+    originOverride !== undefined ? originOverride : getShareOrigin();
+  if (origin) {
+    return `${origin}/task/${safeId}`;
+  }
+  return `/task/${safeId}`;
+}
+
+function parseAssignmentDoc(
+  docId: string,
+  data: Record<string, unknown>
+): StudentAssignment {
+  return {
+    id: String(data.id || docId),
+    ownerId: String(data.ownerId || ''),
+    ownerType: data.ownerType === 'passcode' ? 'passcode' : 'google',
+    ownerDisplayName: String(data.ownerDisplayName || 'Teacher').slice(0, 80),
+    title: String(data.title || 'Student Practice').slice(0, 120),
+    instructions: String(data.instructions || '').slice(0, 2000),
+    entries: Array.isArray(data.entries)
+      ? data.entries.map((v) => String(v).slice(0, 120)).slice(0, 200)
+      : [],
+    paletteId: (['vibrant', 'classroom', 'sunset', 'ocean'].includes(String(data.paletteId))
+      ? String(data.paletteId)
+      : 'vibrant') as PaletteId,
+    allowWheelSpin: data.allowWheelSpin !== false,
+    active: data.active !== false,
+    createdAtMs: toMillis(data.createdAt),
+    updatedAtMs: toMillis(data.updatedAt),
+  };
+}
+
+function parseSubmissionDoc(
+  docId: string,
+  data: Record<string, unknown>
+): StudentSubmission {
+  return {
+    id: String(data.id || docId),
+    assignmentId: String(data.assignmentId || ''),
+    ownerId: String(data.ownerId || ''),
+    studentName: String(data.studentName || 'Student').slice(0, 80),
+    groupLabel: String(data.groupLabel || '').slice(0, 60),
+    drawnItem: String(data.drawnItem || '').slice(0, 120),
+    answerText: String(data.answerText || '').slice(0, 2000),
+    status: data.status === 'reviewed' ? 'reviewed' : 'submitted',
+    submittedAtMs: toMillis(data.submittedAt),
+  };
+}
+
+export async function createStudentAssignment(input: {
+  ownerId: string;
+  ownerType: AssignmentOwnerType;
+  ownerDisplayName: string;
+  title: string;
+  instructions: string;
+  entries: string[];
+  paletteId: PaletteId;
+  allowWheelSpin: boolean;
+}): Promise<StudentAssignment> {
+  const assignmentId = generateAssignmentId();
+  const safeOwnerId = sanitizeId(input.ownerId);
+  const safeOwnerName = input.ownerDisplayName.trim().slice(0, 80) || 'Teacher';
+  const safeTitle = clampTitle(input.title);
+  const safeInstructions = input.instructions.trim().slice(0, 2000);
+  const safeEntries = clampEntries(input.entries);
+  const path = `assignments/${assignmentId}`;
+
+  try {
+    await setDoc(doc(db, 'assignments', assignmentId), {
+      id: assignmentId,
+      ownerId: safeOwnerId,
+      ownerType: input.ownerType,
+      ownerDisplayName: safeOwnerName,
+      title: safeTitle,
+      instructions: safeInstructions,
+      entries: safeEntries,
+      paletteId: input.paletteId,
+      allowWheelSpin: Boolean(input.allowWheelSpin),
+      active: true,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+    const now = Date.now();
+    return {
+      id: assignmentId,
+      ownerId: safeOwnerId,
+      ownerType: input.ownerType,
+      ownerDisplayName: safeOwnerName,
+      title: safeTitle,
+      instructions: safeInstructions,
+      entries: safeEntries,
+      paletteId: input.paletteId,
+      allowWheelSpin: Boolean(input.allowWheelSpin),
+      active: true,
+      createdAtMs: now,
+      updatedAtMs: now,
+    };
+  } catch (error) {
+    handleFirestoreError(error, OperationType.CREATE, path);
+  }
+}
+
+export async function updateStudentAssignment(
+  assignmentId: string,
+  updates: Partial<{
+    title: string;
+    instructions: string;
+    entries: string[];
+    paletteId: PaletteId;
+    allowWheelSpin: boolean;
+    active: boolean;
+  }>
+): Promise<void> {
+  const safeId = sanitizeId(assignmentId);
+  const path = `assignments/${safeId}`;
+  const payload: Record<string, unknown> = {
+    updatedAt: serverTimestamp(),
+  };
+  if (typeof updates.title === 'string') payload.title = clampTitle(updates.title);
+  if (typeof updates.instructions === 'string') {
+    payload.instructions = updates.instructions.trim().slice(0, 2000);
+  }
+  if (Array.isArray(updates.entries)) payload.entries = clampEntries(updates.entries);
+  if (updates.paletteId) payload.paletteId = updates.paletteId;
+  if (typeof updates.allowWheelSpin === 'boolean') {
+    payload.allowWheelSpin = updates.allowWheelSpin;
+  }
+  if (typeof updates.active === 'boolean') payload.active = updates.active;
+
+  try {
+    await updateDoc(doc(db, 'assignments', safeId), payload);
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, path);
+  }
+}
+
+export async function deleteStudentAssignment(assignmentId: string): Promise<void> {
+  const safeId = sanitizeId(assignmentId);
+  const path = `assignments/${safeId}`;
+  try {
+    await deleteDoc(doc(db, 'assignments', safeId));
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, path);
+  }
+}
+
+export async function getStudentAssignment(
+  assignmentId: string
+): Promise<StudentAssignment | null> {
+  const safeId = sanitizeId(assignmentId);
+  if (!/^asgn_[a-zA-Z0-9_\-]+$/.test(safeId) || safeId.length < 16) {
+    return null;
+  }
+  const path = `assignments/${safeId}`;
+  try {
+    const snap = await getDoc(doc(db, 'assignments', safeId));
+    if (!snap.exists()) return null;
+    return parseAssignmentDoc(snap.id, snap.data() as Record<string, unknown>);
+  } catch (error) {
+    handleFirestoreError(error, OperationType.GET, path);
+  }
+}
+
+export function subscribeUserAssignments(
+  ownerUid: string,
+  onData: (assignments: StudentAssignment[]) => void
+): Unsubscribe {
+  const safeUid = sanitizeId(ownerUid);
+  const path = 'assignments';
+  // Query without orderBy to avoid requiring a composite Firestore index; sort client-side.
+  const q = query(collection(db, 'assignments'), where('ownerId', '==', safeUid));
+  return onSnapshot(
+    q,
+    (snapshot) => {
+      const list = snapshot.docs
+        .map((d) => parseAssignmentDoc(d.id, d.data() as Record<string, unknown>))
+        .sort((a, b) => b.createdAtMs - a.createdAtMs);
+      onData(list);
+    },
+    (error) => {
+      handleFirestoreError(error, OperationType.LIST, path);
+    }
+  );
+}
+
+export function subscribeAllAssignments(
+  onData: (assignments: StudentAssignment[]) => void
+): Unsubscribe {
+  const path = 'assignments';
+  const q = query(collection(db, 'assignments'), orderBy('createdAt', 'desc'));
+  return onSnapshot(
+    q,
+    (snapshot) => {
+      const list = snapshot.docs.map((d) =>
+        parseAssignmentDoc(d.id, d.data() as Record<string, unknown>)
+      );
+      onData(list);
+    },
+    (error) => {
+      handleFirestoreError(error, OperationType.LIST, path);
+    }
+  );
+}
+
+export async function submitStudentWork(
+  assignmentId: string,
+  ownerId: string,
+  input: {
+    studentName: string;
+    groupLabel?: string;
+    drawnItem?: string;
+    answerText: string;
+  }
+): Promise<StudentSubmission> {
+  const safeAssignmentId = sanitizeId(assignmentId);
+  const safeOwnerId = sanitizeId(ownerId);
+  const submissionId = generateSubmissionId();
+  const safeStudentName = input.studentName.trim().slice(0, 80);
+  const safeGroupLabel = (input.groupLabel || '').trim().slice(0, 60);
+  const safeDrawnItem = (input.drawnItem || '').trim().slice(0, 120);
+  const safeAnswerText = input.answerText.trim().slice(0, 2000);
+  const path = `assignments/${safeAssignmentId}/submissions/${submissionId}`;
+
+  try {
+    await setDoc(doc(db, 'assignments', safeAssignmentId, 'submissions', submissionId), {
+      id: submissionId,
+      assignmentId: safeAssignmentId,
+      ownerId: safeOwnerId,
+      studentName: safeStudentName,
+      groupLabel: safeGroupLabel,
+      drawnItem: safeDrawnItem,
+      answerText: safeAnswerText,
+      status: 'submitted',
+      submittedAt: serverTimestamp(),
+    });
+    return {
+      id: submissionId,
+      assignmentId: safeAssignmentId,
+      ownerId: safeOwnerId,
+      studentName: safeStudentName,
+      groupLabel: safeGroupLabel,
+      drawnItem: safeDrawnItem,
+      answerText: safeAnswerText,
+      status: 'submitted',
+      submittedAtMs: Date.now(),
+    };
+  } catch (error) {
+    handleFirestoreError(error, OperationType.CREATE, path);
+  }
+}
+
+export function subscribeAssignmentSubmissions(
+  assignmentId: string,
+  options: { isAdmin: boolean; ownerUid?: string },
+  onData: (submissions: StudentSubmission[]) => void
+): Unsubscribe {
+  const safeId = sanitizeId(assignmentId);
+  const path = `assignments/${safeId}/submissions`;
+  const subCol = collection(db, 'assignments', safeId, 'submissions');
+  const q = options.isAdmin
+    ? query(subCol, orderBy('submittedAt', 'desc'))
+    : query(subCol, where('ownerId', '==', sanitizeId(options.ownerUid || '')));
+
+  return onSnapshot(
+    q,
+    (snapshot) => {
+      const list = snapshot.docs
+        .map((d) => parseSubmissionDoc(d.id, d.data() as Record<string, unknown>))
+        .sort((a, b) => b.submittedAtMs - a.submittedAtMs);
+      onData(list);
+    },
+    (error) => {
+      handleFirestoreError(error, OperationType.LIST, path);
+    }
+  );
+}
+
+export async function updateSubmissionStatus(
+  assignmentId: string,
+  submissionId: string,
+  status: 'submitted' | 'reviewed'
+): Promise<void> {
+  const safeAssignmentId = sanitizeId(assignmentId);
+  const safeSubId = sanitizeId(submissionId);
+  const path = `assignments/${safeAssignmentId}/submissions/${safeSubId}`;
+  try {
+    await updateDoc(doc(db, 'assignments', safeAssignmentId, 'submissions', safeSubId), {
+      status,
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, path);
+  }
+}
+
+export async function deleteSubmission(
+  assignmentId: string,
+  submissionId: string
+): Promise<void> {
+  const safeAssignmentId = sanitizeId(assignmentId);
+  const safeSubId = sanitizeId(submissionId);
+  const path = `assignments/${safeAssignmentId}/submissions/${safeSubId}`;
+  try {
+    await deleteDoc(doc(db, 'assignments', safeAssignmentId, 'submissions', safeSubId));
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, path);
+  }
+}
+
 
 
