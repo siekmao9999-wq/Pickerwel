@@ -3,10 +3,12 @@
 import React, { useMemo } from 'react';
 import katex from 'katex';
 import 'katex/dist/katex.min.css';
+import 'katex/contrib/mhchem';
 
 interface MathTextProps {
   text: string;
   className?: string;
+  explicitOnly?: boolean;
 }
 
 type Segment =
@@ -14,17 +16,17 @@ type Segment =
   | { type: 'math'; latex: string; display: boolean };
 
 const CHEM_MAP: Record<string, string> = {
-  H2O: '\\mathrm{H_2O}',
-  CO2: '\\mathrm{CO_2}',
-  O2: '\\mathrm{O_2}',
-  N2: '\\mathrm{N_2}',
-  H2: '\\mathrm{H_2}',
-  CH4: '\\mathrm{CH_4}',
-  NaCl: '\\mathrm{NaCl}',
+  H2O: '\\ce{H2O}',
+  CO2: '\\ce{CO2}',
+  O2: '\\ce{O2}',
+  N2: '\\ce{N2}',
+  H2: '\\ce{H2}',
+  CH4: '\\ce{CH4}',
+  NaCl: '\\ce{NaCl}',
 };
 
 const EXPLICIT_MATH_RE =
-  /\$\$([\s\S]+?)\$\$|\$([^$\n]+?)\$|\\\[([\s\S]+?)\\\]|\\\(([\s\S]+?)\\\)/g;
+  /\$\$([\s\S]+?)\$\$|\$([^$\n]+?)\$|\\\[([\s\S]+?)\\\]|\\\(([\s\S]+?)\\\)|(\\ce\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\})|(\\pu\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\})/g;
 
 const INLINE_AUTO_MATH_RE =
   /(\b(?:H2O|CO2|O2|N2|H2|CH4|NaCl)\b|√\([^)]+\)|√[0-9a-zA-Z]+|(?<![A-Za-z])(?:\d+(?:\.\d+)?|\d*[a-zA-Z](?:\^[0-9a-zA-Z]+)?)(?:\s*[+\-×÷=<>≤≥≠]\s*(?:\d+(?:\.\d+)?|\d*[a-zA-Z](?:\^[0-9a-zA-Z]+)?))+(?![A-Za-z])|\b\d+(?:\.\d+)?[°%]|\b[a-zA-Z]\^(?:\{[^}]+\}|[0-9a-zA-Z+-]+)|(?<=^|[\s\u1780-\u17FF(])[xyzabcnmtk](?=[\s\u1780-\u17FF)?.,!]|$))/g;
@@ -33,13 +35,10 @@ function normalizeToLatex(raw: string): string {
   if (CHEM_MAP[raw]) return CHEM_MAP[raw];
 
   let out = raw;
-  // √(expr) or √144 -> \sqrt{expr}
   out = out.replace(/√\(([^)]+)\)/g, '\\sqrt{$1}');
   out = out.replace(/√([0-9a-zA-Z]+)/g, '\\sqrt{$1}');
-  // Degree and percent symbols
   out = out.replace(/°/g, '^\\circ');
   out = out.replace(/%/g, '\\%');
-  // Unicode arithmetic operators
   out = out.replace(/×/g, ' \\times ');
   out = out.replace(/÷/g, ' \\div ');
   out = out.replace(/≤/g, ' \\le ');
@@ -48,7 +47,10 @@ function normalizeToLatex(raw: string): string {
   return out;
 }
 
-function splitPlainSegment(plain: string): Segment[] {
+function splitPlainSegment(plain: string, explicitOnly: boolean): Segment[] {
+  if (explicitOnly) {
+    return plain ? [{ type: 'text', value: plain }] : [];
+  }
   const parts: Segment[] = [];
   let lastIndex = 0;
   INLINE_AUTO_MATH_RE.lastIndex = 0;
@@ -75,7 +77,7 @@ function splitPlainSegment(plain: string): Segment[] {
   return parts;
 }
 
-function parseMathSegments(input: string): Segment[] {
+function parseMathSegments(input: string, explicitOnly: boolean): Segment[] {
   if (!input) return [];
   const segments: Segment[] = [];
   let lastIndex = 0;
@@ -85,11 +87,11 @@ function parseMathSegments(input: string): Segment[] {
   while ((match = EXPLICIT_MATH_RE.exec(input)) !== null) {
     const start = match.index;
     if (start > lastIndex) {
-      segments.push(...splitPlainSegment(input.slice(lastIndex, start)));
+      segments.push(...splitPlainSegment(input.slice(lastIndex, start), explicitOnly));
     }
 
     const displayLatex = match[1] ?? match[3];
-    const inlineLatex = match[2] ?? match[4];
+    const inlineLatex = match[2] ?? match[4] ?? match[5] ?? match[6];
     segments.push({
       type: 'math',
       latex: (displayLatex ?? inlineLatex ?? '').trim(),
@@ -99,15 +101,21 @@ function parseMathSegments(input: string): Segment[] {
   }
 
   if (lastIndex < input.length) {
-    segments.push(...splitPlainSegment(input.slice(lastIndex)));
+    segments.push(...splitPlainSegment(input.slice(lastIndex), explicitOnly));
   }
 
   return segments;
 }
 
-export function MathText({ text, className = '' }: MathTextProps) {
+export function hasExplicitMathSyntax(text: string): boolean {
+  if (!text) return false;
+  EXPLICIT_MATH_RE.lastIndex = 0;
+  return EXPLICIT_MATH_RE.test(text);
+}
+
+export function MathText({ text, className = '', explicitOnly = false }: MathTextProps) {
   const renderedParts = useMemo(() => {
-    const segments = parseMathSegments(text);
+    const segments = parseMathSegments(text, explicitOnly);
     return segments.map((seg, idx) => {
       if (seg.type === 'text') {
         return { key: idx, isMath: false as const, text: seg.value, display: false };
@@ -125,7 +133,7 @@ export function MathText({ text, className = '' }: MathTextProps) {
       }
       return { key: idx, isMath: true as const, html, display: seg.display };
     });
-  }, [text]);
+  }, [explicitOnly, text]);
 
   return (
     <span className={`math-text leading-relaxed ${className}`}>

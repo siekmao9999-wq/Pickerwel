@@ -11,6 +11,11 @@ interface WinnerModalProps {
   wheelTitle: string;
   language: Language;
   canRemove: boolean;
+  winnerImageUrl?: string;
+  winnerEmoji?: string;
+  winnerEmojiBg?: string;
+  winnerColorHex?: string;
+  winnerNote?: string;
   onRemoveWinner: () => void;
   onKeepAndSpinAgain: () => void;
   onClose: () => void;
@@ -21,6 +26,11 @@ export function WinnerModal({
   wheelTitle,
   language,
   canRemove,
+  winnerImageUrl,
+  winnerEmoji,
+  winnerEmojiBg,
+  winnerColorHex,
+  winnerNote,
   onRemoveWinner,
   onKeepAndSpinAgain,
   onClose,
@@ -38,6 +48,8 @@ export function WinnerModal({
 
   if (!result) return null;
 
+  const accentColor = winnerColorHex || result.winnerColor;
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-sm animate-in fade-in duration-150"
@@ -52,7 +64,7 @@ export function WinnerModal({
         {/* Top Color Accent Strip matching winning segment */}
         <div
           className="h-3 w-full"
-          style={{ backgroundColor: result.winnerColor }}
+          style={{ backgroundColor: accentColor }}
           aria-hidden="true"
         />
 
@@ -66,12 +78,35 @@ export function WinnerModal({
         </button>
 
         <div className="px-5 sm:px-6 pt-6 sm:pt-7 pb-6 text-center">
-          <div
-            className="mx-auto mb-4 w-14 h-14 rounded-2xl flex items-center justify-center text-white shadow-md"
-            style={{ backgroundColor: result.winnerColor }}
-          >
-            <Trophy className="w-7 h-7" />
-          </div>
+          {winnerImageUrl ? (
+            <div className="mx-auto mb-4 w-36 h-36 rounded-2xl overflow-hidden border border-slate-200 dark:border-slate-700 shadow-md">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={winnerImageUrl}
+                alt={result.winner}
+                className="w-full h-full object-cover"
+              />
+            </div>
+          ) : winnerEmoji ? (
+            <div
+              className="mx-auto mb-4 w-24 h-24 rounded-2xl flex items-center justify-center text-5xl shadow-md border border-black/10"
+              style={{ backgroundColor: winnerEmojiBg || '#F1F5F9' }}
+            >
+              <span>{winnerEmoji}</span>
+            </div>
+          ) : winnerColorHex ? (
+            <div
+              className="mx-auto mb-4 w-20 h-20 rounded-2xl border border-black/15 shadow-md"
+              style={{ backgroundColor: winnerColorHex }}
+            />
+          ) : (
+            <div
+              className="mx-auto mb-4 w-14 h-14 rounded-2xl flex items-center justify-center text-white shadow-md"
+              style={{ backgroundColor: accentColor }}
+            >
+              <Trophy className="w-7 h-7" />
+            </div>
+          )}
 
           <p
             id="winner-modal-heading"
@@ -83,6 +118,12 @@ export function WinnerModal({
           <h2 className="mt-2 font-display text-3xl sm:text-4xl font-bold text-slate-900 dark:text-white break-words">
             {result.winner}
           </h2>
+
+          {winnerNote && (
+            <p className="mt-2 text-sm font-medium text-slate-700 dark:text-slate-200 bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2">
+              {winnerNote}
+            </p>
+          )}
 
           <p className="mt-2 text-xs text-slate-500 dark:text-slate-400 truncate">
             {t.winnerSubheading} · {wheelTitle}

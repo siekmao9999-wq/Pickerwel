@@ -53,41 +53,44 @@ function buildGroups(params: {
   tasksText: string;
   colors: string[];
   language: Language;
+  deterministic?: boolean;
 }): QuickGroup[] {
   const clean = params.entries.map((e) => e.trim()).filter(Boolean);
   if (clean.length === 0) return [];
 
-  const shuffled = shuffleArray(clean);
+  const ordered = params.deterministic ? [...clean] : shuffleArray(clean);
   const actualCount =
     params.splitMode === 'count'
-      ? Math.max(1, Math.min(12, params.groupCount, shuffled.length))
-      : Math.max(1, Math.ceil(shuffled.length / Math.max(1, params.groupSize)));
+      ? Math.max(1, Math.min(12, params.groupCount, ordered.length))
+      : Math.max(1, Math.ceil(ordered.length / Math.max(1, params.groupSize)));
 
   const buckets: string[][] = Array.from({ length: actualCount }, () => []);
-  shuffled.forEach((student, idx) => {
+  ordered.forEach((student, idx) => {
     buckets[idx % actualCount].push(student);
   });
 
-  const tasks = shuffleArray(
-    params.tasksText
-      .split(/\r?\n/)
-      .map((l) => l.trim())
-      .filter(Boolean)
-  );
+  const parsedTasks = params.tasksText
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter(Boolean);
+  const tasks = params.deterministic ? parsedTasks : shuffleArray(parsedTasks);
+  const idPrefix = params.deterministic ? 'init' : String(Date.now());
 
   return buckets.map((bucket, gIdx) => {
     const leaderIdx =
       params.autoLeader && bucket.length > 0
-        ? Math.floor(Math.random() * bucket.length)
+        ? params.deterministic
+          ? 0
+          : Math.floor(Math.random() * bucket.length)
         : -1;
     return {
-      id: `qg_${Date.now()}_${gIdx}`,
+      id: `qg_${idPrefix}_${gIdx}`,
       name:
         params.language === 'km' ? `ក្រុមទី ${gIdx + 1}` : `Group ${gIdx + 1}`,
       color: params.colors[gIdx % params.colors.length],
       task: tasks.length > 0 ? tasks[gIdx % tasks.length] : undefined,
       members: bucket.map((name, mIdx) => ({
-        id: `qgm_${Date.now()}_${gIdx}_${mIdx}`,
+        id: `qgm_${idPrefix}_${gIdx}_${mIdx}`,
         name,
         isLeader: mIdx === leaderIdx,
       })),
@@ -127,6 +130,7 @@ export function QuickGroupSplitPanel({
       tasksText: '',
       colors: paletteColors,
       language,
+      deterministic: true,
     })
   );
 

@@ -521,6 +521,188 @@
         "status",
         "submittedAt"
       ]
+    },
+    "CustomForm": {
+      "title": "CustomForm",
+      "description": "A Google Forms-style custom survey, poll, or auto-graded quiz published by a registered user with a unique share link and QR code.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 16,
+          "maxLength": 128,
+          "pattern": "^frm_[a-zA-Z0-9_\\-]+$",
+          "description": "Unguessable form identifier used in the public respondent URL and QR code."
+        },
+        "ownerId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "UID of the Google user or memberId of the Passcode user who created this form."
+        },
+        "ownerType": {
+          "type": "string",
+          "enum": ["google", "passcode"],
+          "description": "Account type of the form creator."
+        },
+        "ownerDisplayName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80,
+          "description": "Creator display name shown on the form header."
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 140,
+          "description": "Form title."
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 2000,
+          "description": "Optional form description shown below the title."
+        },
+        "themeId": {
+          "type": "string",
+          "enum": ["purple", "indigo", "blue", "teal", "emerald", "rose", "amber"],
+          "description": "Selected visual accent theme for the form."
+        },
+        "questions": {
+          "type": "array",
+          "description": "Bounded list of up to 50 form question blocks."
+        },
+        "acceptingResponses": {
+          "type": "boolean",
+          "description": "Whether respondents can currently submit answers."
+        },
+        "isQuiz": {
+          "type": "boolean",
+          "description": "Whether quiz scoring and answer keys are enabled."
+        },
+        "collectRespondentName": {
+          "type": "boolean",
+          "description": "Whether the form asks for the respondent display name."
+        },
+        "emailMode": {
+          "type": "string",
+          "enum": ["none", "optional", "required"],
+          "description": "Whether respondents submit without email, with optional email, or with a required email."
+        },
+        "allowMultipleResponses": {
+          "type": "boolean",
+          "description": "Whether respondents can submit another response after finishing."
+        },
+        "shuffleQuestions": {
+          "type": "boolean",
+          "description": "Whether question display order is randomized for each respondent."
+        },
+        "confirmationMessage": {
+          "type": "string",
+          "maxLength": 400,
+          "description": "Custom confirmation message displayed after submission."
+        },
+        "published": {
+          "type": "boolean",
+          "description": "Whether the form is live and open via its shareable link."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server creation timestamp."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server last update timestamp."
+        }
+      },
+      "required": [
+        "id",
+        "ownerId",
+        "ownerType",
+        "ownerDisplayName",
+        "title",
+        "description",
+        "themeId",
+        "questions",
+        "acceptingResponses",
+        "isQuiz",
+        "collectRespondentName",
+        "emailMode",
+        "allowMultipleResponses",
+        "shuffleQuestions",
+        "confirmationMessage",
+        "published",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "FormResponse": {
+      "title": "FormResponse",
+      "description": "A respondent submission attached to a published CustomForm, readable only by the form owner and Admins.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Unique response document identifier."
+        },
+        "formId": {
+          "type": "string",
+          "minLength": 16,
+          "maxLength": 128,
+          "pattern": "^frm_[a-zA-Z0-9_\\-]+$",
+          "description": "Parent CustomForm identifier."
+        },
+        "ownerId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Denormalized ownerId from the parent CustomForm for O(1) owner-scoped listing."
+        },
+        "respondentName": {
+          "type": "string",
+          "maxLength": 80,
+          "description": "Optional respondent display name."
+        },
+        "respondentEmail": {
+          "type": "string",
+          "maxLength": 120,
+          "description": "Optional respondent email when email collection is enabled."
+        },
+        "answers": {
+          "type": "array",
+          "description": "Bounded list of up to 50 answer entries ({ questionId, answerText })."
+        },
+        "score": {
+          "type": "number",
+          "description": "Auto-graded quiz score earned (0 if not a quiz)."
+        },
+        "maxScore": {
+          "type": "number",
+          "description": "Maximum possible quiz score (0 if not a quiz)."
+        },
+        "submittedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server submission timestamp."
+        }
+      },
+      "required": [
+        "id",
+        "formId",
+        "ownerId",
+        "respondentName",
+        "respondentEmail",
+        "answers",
+        "score",
+        "maxScore",
+        "submittedAt"
+      ]
     }
   },
   "firestore": {
@@ -559,6 +741,14 @@
     "/assignments/{assignmentId}/submissions/{submissionId}": {
       "schema": { "$ref": "#/entities/StudentSubmission" },
       "description": "Stores student work submissions for an assignment, strictly isolated to its owner and Admins."
+    },
+    "/forms/{formId}": {
+      "schema": { "$ref": "#/entities/CustomForm" },
+      "description": "Stores published Google Forms-style surveys and quizzes with unique share links and QR codes."
+    },
+    "/forms/{formId}/responses/{responseId}": {
+      "schema": { "$ref": "#/entities/FormResponse" },
+      "description": "Stores respondent answers for a published CustomForm, readable only by its owner and Admins."
     }
   }
 }

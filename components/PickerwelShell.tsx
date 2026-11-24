@@ -23,11 +23,17 @@ import {
   Users,
   Github,
   QrCode,
+  ClipboardList,
 } from 'lucide-react';
-import { usePickerwel, type NavSection } from './PickerwelProvider';
+import {
+  usePickerwel,
+  NAV_ROUTES,
+  type NavSection,
+} from './PickerwelProvider';
 import { AuthModal } from './AuthModal';
 import { PWAInstallButton } from './PWAInstallButton';
 import { OfflineIndicator } from './OfflineIndicator';
+import { FormPendingSyncManager } from './forms/FormPendingSyncManager';
 import { COPY } from '@/lib/i18n';
 import { attemptChunkRecovery, isChunkLoadError } from '@/lib/chunk-recovery';
 
@@ -45,12 +51,15 @@ export function PickerwelShell({ children }: { children: React.ReactNode }) {
     appAdminName,
     activeNav,
     setActiveNav,
+    markPendingNav,
     settings,
     updateSettings,
   } = usePickerwel();
 
   const pathname = usePathname();
-  const isStudentTaskRoute = Boolean(pathname && pathname.startsWith('/task/'));
+  const isStudentTaskRoute = Boolean(
+    pathname && (pathname.startsWith('/task/') || pathname.startsWith('/form/'))
+  );
   const t = COPY[settings.language];
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [mobileProfileOpen, setMobileProfileOpen] = useState(false);
@@ -91,6 +100,7 @@ export function PickerwelShell({ children }: { children: React.ReactNode }) {
     { id: 'templates', label: t.navTemplates, icon: Sparkles },
     { id: 'groups', label: t.navGroups, icon: Users },
     { id: 'tasks', label: t.navTasks, icon: QrCode },
+    { id: 'forms', label: t.navForms, icon: ClipboardList },
     { id: 'games', label: t.navGames, icon: Gamepad2 },
     { id: 'stopwatch', label: t.navStopwatch, icon: Watch },
     { id: 'history', label: t.navHistory, icon: History },
@@ -152,6 +162,8 @@ export function PickerwelShell({ children }: { children: React.ReactNode }) {
           </div>
         </header>
         {children}
+        <OfflineIndicator language={settings.language} />
+        <FormPendingSyncManager language={settings.language} />
       </div>
     );
   }
@@ -188,12 +200,14 @@ export function PickerwelShell({ children }: { children: React.ReactNode }) {
             const Icon = item.icon;
             const active = activeNav === item.id;
             return (
-              <button
+              <Link
                 key={item.id}
-                type="button"
-                onClick={() => setActiveNav(item.id)}
+                href={NAV_ROUTES[item.id]}
+                prefetch
+                onClick={() => markPendingNav(item.id)}
                 title={item.label}
                 aria-label={item.label}
+                aria-current={active ? 'page' : undefined}
                 className={`relative w-full min-h-[42px] px-2 lg:px-3 py-2 rounded-xl text-sm font-medium flex items-center justify-center lg:justify-between gap-2 transition-colors cursor-pointer whitespace-nowrap ${
                   active
                     ? 'bg-blue-50 dark:bg-blue-950/60 text-[#3B82F6] dark:text-blue-400 font-semibold'
@@ -209,7 +223,7 @@ export function PickerwelShell({ children }: { children: React.ReactNode }) {
                     {item.count}
                   </span>
                 )}
-              </button>
+              </Link>
             );
           })}
         </nav>
@@ -325,9 +339,12 @@ export function PickerwelShell({ children }: { children: React.ReactNode }) {
           </div>
 
           <div className="flex items-center gap-1">
-            <button
-              type="button"
-              onClick={() => setActiveNav(activeNav === 'games' ? 'home' : 'games')}
+            <Link
+              href={activeNav === 'games' ? NAV_ROUTES.home : NAV_ROUTES.games}
+              prefetch
+              onClick={() =>
+                markPendingNav(activeNav === 'games' ? 'home' : 'games')
+              }
               aria-label={t.navGames}
               className={`min-h-[44px] min-w-[44px] rounded-xl flex items-center justify-center cursor-pointer ${
                 activeNav === 'games'
@@ -336,11 +353,14 @@ export function PickerwelShell({ children }: { children: React.ReactNode }) {
               }`}
             >
               <Gamepad2 className="w-5 h-5" />
-            </button>
-            <button
-              type="button"
+            </Link>
+            <Link
+              href={
+                activeNav === 'stopwatch' ? NAV_ROUTES.home : NAV_ROUTES.stopwatch
+              }
+              prefetch
               onClick={() =>
-                setActiveNav(activeNav === 'stopwatch' ? 'home' : 'stopwatch')
+                markPendingNav(activeNav === 'stopwatch' ? 'home' : 'stopwatch')
               }
               aria-label={t.navStopwatch}
               className={`min-h-[44px] min-w-[44px] rounded-xl flex items-center justify-center cursor-pointer ${
@@ -350,7 +370,7 @@ export function PickerwelShell({ children }: { children: React.ReactNode }) {
               }`}
             >
               <Watch className="w-5 h-5" />
-            </button>
+            </Link>
             <button
               type="button"
               onClick={() =>
@@ -408,11 +428,12 @@ export function PickerwelShell({ children }: { children: React.ReactNode }) {
                 const Icon = item.icon;
                 const active = activeNav === item.id;
                 return (
-                  <button
+                  <Link
                     key={item.id}
-                    type="button"
+                    href={NAV_ROUTES[item.id]}
+                    prefetch
                     onClick={() => {
-                      setActiveNav(item.id);
+                      markPendingNav(item.id);
                       setMobileMenuOpen(false);
                     }}
                     className={`w-full min-h-[44px] px-3.5 py-2.5 rounded-xl text-sm font-medium flex items-center justify-between gap-2 transition-colors cursor-pointer ${
@@ -430,7 +451,7 @@ export function PickerwelShell({ children }: { children: React.ReactNode }) {
                         {item.count}
                       </span>
                     )}
-                  </button>
+                  </Link>
                 );
               })}
             </nav>
@@ -586,9 +607,10 @@ export function PickerwelShell({ children }: { children: React.ReactNode }) {
         aria-label="Mobile bottom navigation"
       >
         <div className="h-16 grid grid-cols-4 items-center">
-          <button
-            type="button"
-            onClick={() => setActiveNav('home')}
+          <Link
+            href={NAV_ROUTES.home}
+            prefetch
+            onClick={() => markPendingNav('home')}
             className={`h-full flex flex-col items-center justify-center gap-0.5 cursor-pointer ${
               activeNav === 'home'
                 ? 'text-[#3B82F6] dark:text-blue-400 font-semibold'
@@ -599,11 +621,12 @@ export function PickerwelShell({ children }: { children: React.ReactNode }) {
             <span className="text-[11px] leading-tight truncate max-w-[76px]">
               {t.navHome}
             </span>
-          </button>
+          </Link>
 
-          <button
-            type="button"
-            onClick={() => setActiveNav('wheels')}
+          <Link
+            href={NAV_ROUTES.wheels}
+            prefetch
+            onClick={() => markPendingNav('wheels')}
             className={`h-full flex flex-col items-center justify-center gap-0.5 cursor-pointer ${
               activeNav === 'wheels'
                 ? 'text-[#3B82F6] dark:text-blue-400 font-semibold'
@@ -614,11 +637,12 @@ export function PickerwelShell({ children }: { children: React.ReactNode }) {
             <span className="text-[11px] leading-tight truncate max-w-[76px]">
               {t.navMyWheels}
             </span>
-          </button>
+          </Link>
 
-          <button
-            type="button"
-            onClick={() => setActiveNav('history')}
+          <Link
+            href={NAV_ROUTES.history}
+            prefetch
+            onClick={() => markPendingNav('history')}
             className={`h-full flex flex-col items-center justify-center gap-0.5 cursor-pointer ${
               activeNav === 'history'
                 ? 'text-[#3B82F6] dark:text-blue-400 font-semibold'
@@ -629,7 +653,7 @@ export function PickerwelShell({ children }: { children: React.ReactNode }) {
             <span className="text-[11px] leading-tight truncate max-w-[76px]">
               {t.navHistory}
             </span>
-          </button>
+          </Link>
 
           <button
             type="button"
@@ -648,8 +672,9 @@ export function PickerwelShell({ children }: { children: React.ReactNode }) {
         </div>
       </nav>
 
-      {/* Offline Status Indicator & Auth Modal */}
+      {/* Offline Status Indicator, Pending Sync Auto-Uploader & Auth Modal */}
       <OfflineIndicator language={settings.language} />
+      <FormPendingSyncManager language={settings.language} />
       <AuthModal />
     </div>
   );

@@ -3,6 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import { X, CheckCircle2, Trash2, Inbox, Clock, Users, Sparkles } from 'lucide-react';
 import { COPY, type Language } from '@/lib/i18n';
+import { MathText } from './MathText';
 import {
   deleteSubmission,
   subscribeAssignmentSubmissions,
@@ -95,7 +96,7 @@ export function AssignmentSubmissionsModal({
         <div className="px-5 py-4 border-b border-slate-200 dark:border-slate-800 flex items-start justify-between gap-3 shrink-0">
           <div className="min-w-0">
             <h2 className="font-display text-lg font-bold text-slate-900 dark:text-white truncate">
-              {assignment.title}
+              <MathText text={assignment.title} explicitOnly />
             </h2>
             <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
               {t.tasksSubmissionsBtn} ·{' '}
@@ -205,9 +206,9 @@ export function AssignmentSubmissionsModal({
                       </div>
                     )}
 
-                    <p className="text-sm text-slate-800 dark:text-slate-100 whitespace-pre-wrap break-words leading-relaxed bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-xl p-3">
-                      {sub.answerText}
-                    </p>
+                    <div className="text-sm text-slate-800 dark:text-slate-100 whitespace-pre-wrap break-words leading-relaxed bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-xl p-3 overflow-x-auto">
+                      <MathText text={sub.answerText} explicitOnly />
+                    </div>
                   </div>
                 );
               })}

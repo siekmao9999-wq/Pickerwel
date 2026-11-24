@@ -244,6 +244,80 @@ service cloud.firestore {
         data.submittedAt is timestamp;
     }
 
+    function isValidFormId(formId) {
+      return formId is string &&
+        formId.size() >= 16 &&
+        formId.size() <= 128 &&
+        formId.matches('^frm_[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isValidCustomForm(data, formId) {
+      return data.keys().hasAll([
+          'id', 'ownerId', 'ownerType', 'ownerDisplayName',
+          'title', 'description', 'themeId', 'questions',
+          'acceptingResponses', 'isQuiz', 'collectRespondentName',
+          'emailMode', 'allowMultipleResponses', 'shuffleQuestions',
+          'confirmationMessage', 'published', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'id', 'ownerId', 'ownerType', 'ownerDisplayName',
+          'title', 'description', 'themeId', 'questions',
+          'acceptingResponses', 'isQuiz', 'collectRespondentName',
+          'emailMode', 'allowMultipleResponses', 'shuffleQuestions',
+          'confirmationMessage', 'published', 'createdAt', 'updatedAt'
+        ]) &&
+        isValidFormId(data.id) &&
+        data.id == formId &&
+        data.ownerType in ['google', 'passcode'] &&
+        (
+          (data.ownerType == 'google' && isValidId(data.ownerId)) ||
+          (data.ownerType == 'passcode' && isValidMemberId(data.ownerId))
+        ) &&
+        data.ownerDisplayName is string && data.ownerDisplayName.size() >= 1 && data.ownerDisplayName.size() <= 80 &&
+        data.title is string && data.title.size() >= 1 && data.title.size() <= 140 &&
+        data.description is string && data.description.size() <= 2000 &&
+        data.themeId in ['purple', 'indigo', 'blue', 'teal', 'emerald', 'rose', 'amber'] &&
+        data.questions is list &&
+        data.questions.size() <= 50 &&
+        (data.questions.size() == 0 || data.questions[0] is map) &&
+        data.acceptingResponses is bool &&
+        data.isQuiz is bool &&
+        data.collectRespondentName is bool &&
+        data.emailMode in ['none', 'optional', 'required'] &&
+        data.allowMultipleResponses is bool &&
+        data.shuffleQuestions is bool &&
+        data.confirmationMessage is string && data.confirmationMessage.size() <= 400 &&
+        data.published is bool &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidFormResponse(data, formId, responseId) {
+      return data.keys().hasAll([
+          'id', 'formId', 'ownerId', 'respondentName', 'respondentEmail',
+          'answers', 'score', 'maxScore', 'submittedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'id', 'formId', 'ownerId', 'respondentName', 'respondentEmail',
+          'answers', 'score', 'maxScore', 'submittedAt'
+        ]) &&
+        isValidId(data.id) &&
+        data.id == responseId &&
+        isValidFormId(data.formId) &&
+        data.formId == formId &&
+        isValidId(data.ownerId) &&
+        data.respondentName is string && data.respondentName.size() <= 80 &&
+        data.respondentEmail is string && data.respondentEmail.size() <= 120 &&
+        data.answers is list &&
+        data.answers.size() <= 50 &&
+        (data.answers.size() == 0 || data.answers[0] is map) &&
+        (data.score is int || data.score is float) &&
+        data.score >= 0 && data.score <= 10000 &&
+        (data.maxScore is int || data.maxScore is float) &&
+        data.maxScore >= 0 && data.maxScore <= 10000 &&
+        data.submittedAt is timestamp;
+    }
+
     // Admin Registry Collection (Primary Admin Only)
     match /admins/{adminUid} {
       allow get: if isValidId(adminUid) && (isOwner(adminUid) || isAdmin());
@@ -484,6 +558,84 @@ service cloud.firestore {
           );
         allow delete: if isValidAssignmentId(assignmentId) &&
           isValidId(submissionId) &&
+          (
+            isAdmin() ||
+            (isVerifiedUser() && existing().ownerId == request.auth.uid && isApprovedUser(request.auth.uid))
+          );
+      }
+    }
+
+    // Google Forms-Style Custom Forms (Unique Share Link & QR-Code, Owner-Isolated Responses, Admin Full View)
+    match /forms/{formId} {
+      allow get: if isValidFormId(formId);
+      allow list: if isAdmin() || (isVerifiedUser() && resource.data.ownerId == request.auth.uid);
+      allow create: if isValidFormId(formId) &&
+        isValidCustomForm(incoming(), formId) &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        (
+          (
+            isVerifiedUser() &&
+            incoming().ownerType == 'google' &&
+            incoming().ownerId == request.auth.uid &&
+            (isAdmin() || isApprovedUser(request.auth.uid))
+          ) ||
+          (
+            incoming().ownerType == 'passcode' &&
+            isValidMemberId(incoming().ownerId) &&
+            exists(/databases/$(database)/documents/passcodeMembers/$(incoming().ownerId)) &&
+            get(/databases/$(database)/documents/passcodeMembers/$(incoming().ownerId)).data.status == 'approved'
+          )
+        );
+      allow update: if isValidFormId(formId) &&
+        isValidCustomForm(incoming(), formId) &&
+        incoming().id == existing().id &&
+        incoming().ownerId == existing().ownerId &&
+        incoming().ownerType == existing().ownerType &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        incoming().diff(existing()).affectedKeys().hasOnly([
+          'title', 'description', 'themeId', 'questions',
+          'acceptingResponses', 'isQuiz', 'collectRespondentName',
+          'emailMode', 'allowMultipleResponses', 'shuffleQuestions',
+          'confirmationMessage', 'published', 'updatedAt'
+        ]) &&
+        (
+          isAdmin() ||
+          (
+            existing().ownerType == 'google' &&
+            isOwner(existing().ownerId) &&
+            isApprovedUser(existing().ownerId)
+          )
+        );
+      allow delete: if isValidFormId(formId) &&
+        (
+          isAdmin() ||
+          (
+            existing().ownerType == 'google' &&
+            isOwner(existing().ownerId) &&
+            isApprovedUser(existing().ownerId)
+          )
+        );
+
+      // Form Responses Subcollection (Owner + Admin Only Read; Public Submit While Published & Accepting)
+      match /responses/{responseId} {
+        allow get: if isValidFormId(formId) &&
+          isValidId(responseId) &&
+          (isAdmin() || (isVerifiedUser() && existing().ownerId == request.auth.uid));
+        allow list: if isValidFormId(formId) &&
+          (isAdmin() || (isVerifiedUser() && resource.data.ownerId == request.auth.uid));
+        allow create: if isValidFormId(formId) &&
+          isValidId(responseId) &&
+          isValidFormResponse(incoming(), formId, responseId) &&
+          incoming().submittedAt == request.time &&
+          exists(/databases/$(database)/documents/forms/$(formId)) &&
+          get(/databases/$(database)/documents/forms/$(formId)).data.published == true &&
+          get(/databases/$(database)/documents/forms/$(formId)).data.acceptingResponses == true &&
+          incoming().ownerId == get(/databases/$(database)/documents/forms/$(formId)).data.ownerId;
+        allow update: if false;
+        allow delete: if isValidFormId(formId) &&
+          isValidId(responseId) &&
           (
             isAdmin() ||
             (isVerifiedUser() && existing().ownerId == request.auth.uid && isApprovedUser(request.auth.uid))

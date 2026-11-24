@@ -27,8 +27,11 @@ import {
   ChevronDown,
   ChevronUp,
   X,
+  Sigma,
 } from 'lucide-react';
 import { usePickerwel } from './PickerwelProvider';
+import { MathText, hasExplicitMathSyntax } from './MathText';
+import { StemFormulaEditorModal } from './forms/StemFormulaEditorModal';
 import { WHEEL_PALETTES } from '@/lib/palettes';
 import { playTickSound, playWinSound, triggerHaptic } from '@/lib/sound';
 import { COPY } from '@/lib/i18n';
@@ -248,6 +251,7 @@ export function GroupTasksView({
   const [balanceTags, setBalanceTags] = useState(true);
 
   const [rulesExpanded, setRulesExpanded] = useState(false);
+  const [mathTypeOpen, setMathTypeOpen] = useState(false);
   const [pinRules, setPinRules] = useState<PinRule[]>([]);
   const [togetherPairs, setTogetherPairs] = useState<StudentPairRule[]>([]);
   const [apartPairs, setApartPairs] = useState<StudentPairRule[]>([]);
@@ -1506,13 +1510,28 @@ export function GroupTasksView({
                 <label className="text-xs font-semibold text-slate-700 dark:text-slate-200 tabular-nums">
                   {t.groupsTasksLabel} ({parsedTasks.length})
                 </label>
-                <button
-                  type="button"
-                  onClick={handleLoadSampleTasks}
-                  className="text-xs font-medium text-[#3B82F6] dark:text-blue-400 hover:underline cursor-pointer whitespace-nowrap"
-                >
-                  {t.groupsSampleTasksBtn}
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setMathTypeOpen(true)}
+                    title={
+                      settings.language === 'km'
+                        ? 'បើក MathType សរសេររូបមន្ត គណិត•រូប•គីមី'
+                        : 'Open MathType Equation Studio'
+                    }
+                    className="px-2 py-0.5 rounded-lg border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 text-[11px] font-semibold inline-flex items-center gap-1 cursor-pointer"
+                  >
+                    <Sigma className="w-3 h-3" />
+                    <span>MathType</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleLoadSampleTasks}
+                    className="text-xs font-medium text-[#3B82F6] dark:text-blue-400 hover:underline cursor-pointer whitespace-nowrap"
+                  >
+                    {t.groupsSampleTasksBtn}
+                  </button>
+                </div>
               </div>
               <textarea
                 rows={4}
@@ -1525,6 +1544,11 @@ export function GroupTasksView({
                 }
                 className="w-full p-3 rounded-2xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500/40"
               />
+              {hasExplicitMathSyntax(tasksText) && (
+                <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/70 border border-slate-200 dark:border-slate-700 text-xs text-slate-800 dark:text-slate-100 whitespace-pre-wrap overflow-x-auto">
+                  <MathText text={tasksText} explicitOnly />
+                </div>
+              )}
             </div>
 
             {/* Action Buttons */}
@@ -1699,7 +1723,9 @@ export function GroupTasksView({
                                     key={`${group.id}_t_${tIdx}`}
                                     className="flex items-start justify-between gap-2 text-xs sm:text-sm font-medium text-slate-800 dark:text-slate-100"
                                   >
-                                    <span className="leading-snug">{task}</span>
+                                    <span className="leading-snug overflow-x-auto">
+                                      <MathText text={task} explicitOnly />
+                                    </span>
                                     <button
                                       type="button"
                                       onClick={() =>
@@ -1851,6 +1877,17 @@ export function GroupTasksView({
           </section>
         </div>
       </div>
+
+      <StemFormulaEditorModal
+        open={mathTypeOpen}
+        language={settings.language}
+        accentColor="#3B82F6"
+        targetLabel={t.groupsTasksLabel}
+        onClose={() => setMathTypeOpen(false)}
+        onInsert={(formula) =>
+          setTasksText((prev) => (prev.trim() ? `${prev}\n${formula}` : formula))
+        }
+      />
     </div>
   );
 }

@@ -23,12 +23,15 @@ import {
   Download,
   Maximize2,
   ArrowLeft,
+  Sigma,
 } from 'lucide-react';
 import { usePickerwel } from './PickerwelProvider';
 import { QrShareModal } from './QrShareModal';
 import { QuickQrModal } from './QuickQrModal';
 import { AssignmentSubmissionsModal } from './AssignmentSubmissionsModal';
 import { QuickJoinTaskCard } from './QuickJoinTaskCard';
+import { MathText, hasExplicitMathSyntax } from './MathText';
+import { StemFormulaEditorModal } from './forms/StemFormulaEditorModal';
 import { COPY } from '@/lib/i18n';
 import { downloadQrPng, renderQrToCanvas } from '@/lib/qr-names';
 import { getShareOrigin, isPrivatePreviewHost } from '@/lib/share-origin';
@@ -178,6 +181,7 @@ export function StudentTasksView() {
   // Modals
   const [qrModalTarget, setQrModalTarget] = useState<StudentAssignment | null>(null);
   const [submissionsTarget, setSubmissionsTarget] = useState<StudentAssignment | null>(null);
+  const [mathTypeOpen, setMathTypeOpen] = useState(false);
 
   const loadFromActiveWheel = () => {
     setTitle(activeWheel.title || '');
@@ -538,12 +542,27 @@ export function StudentTasksView() {
                   </div>
 
                   <div className="space-y-1.5">
-                    <label
-                      htmlFor="student-task-instructions"
-                      className="block text-xs font-semibold text-slate-700 dark:text-slate-300"
-                    >
-                      {t.tasksInstructionsLabel}
-                    </label>
+                    <div className="flex items-center justify-between gap-2">
+                      <label
+                        htmlFor="student-task-instructions"
+                        className="block text-xs font-semibold text-slate-700 dark:text-slate-300"
+                      >
+                        {t.tasksInstructionsLabel}
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => setMathTypeOpen(true)}
+                        title={
+                          settings.language === 'km'
+                            ? 'បើក MathType សរសេររូបមន្ត គណិត•រូប•គីមី'
+                            : 'Open MathType Equation Studio'
+                        }
+                        className="min-h-[30px] px-2.5 rounded-lg border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 hover:bg-blue-100/80 text-xs font-semibold inline-flex items-center gap-1 cursor-pointer"
+                      >
+                        <Sigma className="w-3.5 h-3.5" />
+                        <span>MathType</span>
+                      </button>
+                    </div>
                     <textarea
                       id="student-task-instructions"
                       value={instructions}
@@ -553,6 +572,11 @@ export function StudentTasksView() {
                       placeholder={t.tasksInstructionsPlaceholder}
                       className="w-full p-3 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-sm text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-y"
                     />
+                    {hasExplicitMathSyntax(instructions) && (
+                      <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/70 border border-slate-200 dark:border-slate-700 text-sm text-slate-800 dark:text-slate-100 whitespace-pre-wrap overflow-x-auto">
+                        <MathText text={instructions} explicitOnly />
+                      </div>
+                    )}
                   </div>
                 </div>
 
@@ -819,6 +843,17 @@ export function StudentTasksView() {
         ownerUid={googleUid || undefined}
         language={settings.language}
         onClose={() => setSubmissionsTarget(null)}
+      />
+
+      <StemFormulaEditorModal
+        open={mathTypeOpen}
+        language={settings.language}
+        accentColor="#3B82F6"
+        targetLabel={t.tasksInstructionsLabel}
+        onClose={() => setMathTypeOpen(false)}
+        onInsert={(formula) =>
+          setInstructions((prev) => (prev.trim() ? `${prev} ${formula}` : formula))
+        }
       />
     </div>
   );

@@ -28,6 +28,29 @@ import { QuickStopwatchBar } from './QuickStopwatchBar';
 import { QuickGroupSplitPanel } from './QuickGroupSplitPanel';
 import { ApprovalGateBanner } from './ApprovalGateBanner';
 import { QuickQrModal } from './QuickQrModal';
+import { PickerWheelToolsMenu } from './PickerWheelToolsMenu';
+import { PickerWheelToolDeck } from './PickerWheelToolDeck';
+import {
+  CAMBODIA_PROVINCES,
+  DARE_PROMPTS,
+  ENGLISH_LETTERS,
+  MLB_TEAMS,
+  NAMED_COLORS,
+  NBA_TEAMS,
+  NFL_TEAMS,
+  SAMPLE_INSTAGRAM_COMMENTS,
+  STARTER_IMAGE_ITEMS,
+  TRUTH_PROMPTS,
+  WORLD_COUNTRIES,
+  buildDateEntries,
+  buildNumberEntries,
+  buildYesNoEntries,
+  findColorByEntry,
+  parseInstagramComments,
+  type ImageWheelItem,
+  type ParsedInstagramComment,
+  type WheelToolId,
+} from '@/lib/wheel-tools';
 import { WHEEL_PALETTES, type PaletteId } from '@/lib/palettes';
 import { exportWheelSnapshotPng } from '@/lib/wheel-snapshot';
 import { playWinSound, triggerHaptic } from '@/lib/sound';
@@ -54,11 +77,19 @@ export function PickerwelApp() {
     createNewWheel,
     logSpinOutcome,
     saveStatus,
-    hoveredSliceIndex,
-    setHoveredSliceIndex,
   } = usePickerwel();
 
   const t = COPY[settings.language];
+  const [hoveredSliceIndex, setHoveredSliceIndex] = useState<number | null>(null);
+  const [activeTool, setActiveTool] = useState<WheelToolId>('picker');
+  const [toolSpinNonce, setToolSpinNonce] = useState(0);
+  const [lastToolWinner, setLastToolWinner] = useState<string | null>(null);
+  const [imageItems, setImageItems] = useState<ImageWheelItem[]>(STARTER_IMAGE_ITEMS);
+  const [instagramParsed, setInstagramParsed] = useState<ParsedInstagramComment[]>(() =>
+    parseInstagramComments(SAMPLE_INSTAGRAM_COMMENTS, true, '')
+  );
+  const savedStandardWheelRef = useRef<{ title: string; entries: string[] } | null>(null);
+
   const [winnerResult, setWinnerResult] = useState<SpinResultPayload | null>(null);
   const [outcomeLogged, setOutcomeLogged] = useState(false);
   const [spinTriggerCount, setSpinTriggerCount] = useState(0);
@@ -75,6 +106,162 @@ export function PickerwelApp() {
   const sheetTouchStartY = useRef<number | null>(null);
   const quickGroupsRef = useRef<HTMLDivElement | null>(null);
   const pngTimerRef = useRef<number | null>(null);
+
+  const handleSelectWheelTool = useCallback(
+    (toolId: WheelToolId) => {
+      const km = settings.language === 'km';
+      if (toolId === 'picker') {
+        setActiveTool('picker');
+        setLastToolWinner(null);
+        if (savedStandardWheelRef.current) {
+          updateActiveWheel({
+            title: savedStandardWheelRef.current.title,
+            entries: savedStandardWheelRef.current.entries,
+          });
+          savedStandardWheelRef.current = null;
+        }
+        return;
+      }
+
+      // Preserve user's custom wheel entries when entering a specialized tool
+      if (activeTool === 'picker' && !savedStandardWheelRef.current && toolId !== 'team') {
+        savedStandardWheelRef.current = {
+          title: activeWheel.title,
+          entries: [...activeWheel.entries],
+        };
+      }
+
+      setActiveTool(toolId);
+      setLastToolWinner(null);
+
+      if (toolId === 'team') {
+        setShowQuickGroups(true);
+        requestAnimationFrame(() =>
+          quickGroupsRef.current?.scrollIntoView({
+            behavior: 'smooth',
+            block: 'nearest',
+          })
+        );
+        return;
+      }
+
+      setShowQuickGroups(false);
+
+      switch (toolId) {
+        case 'yes_no':
+          updateActiveWheel({
+            title: km ? 'កងវិល បាទ/ចាស ឬ ទេ' : 'Yes No Picker Wheel',
+            entries: buildYesNoEntries('yes_no', 3, settings.language),
+          });
+          break;
+        case 'number':
+          updateActiveWheel({
+            title: km ? 'ចាប់លេខ (1–30)' : 'Number Picker (1–30)',
+            entries: buildNumberEntries(1, 30, 1, ''),
+          });
+          break;
+        case 'letter':
+          updateActiveWheel({
+            title: km ? 'អក្សរអង់គ្លេស A–Z' : 'English Letters A–Z',
+            entries: ENGLISH_LETTERS,
+          });
+          break;
+        case 'country':
+          updateActiveWheel({
+            title: km ? 'ចាប់ឈ្មោះប្រទេស (Country Picker)' : 'Country Picker Wheel',
+            entries: WORLD_COUNTRIES.map((c) => `${c.flag} ${km ? c.nameKm : c.nameEn}`),
+          });
+          break;
+        case 'state':
+          updateActiveWheel({
+            title: km ? 'រាជធានី-ខេត្តកម្ពុជា ទាំង ២៥' : 'Cambodia 25 Provinces & Capital',
+            entries: CAMBODIA_PROVINCES.map((p) => (km ? p.km : p.en)),
+          });
+          break;
+        case 'color':
+          updateActiveWheel({
+            title: km ? 'ចាប់ពណ៌ (Color Picker)' : 'Color Picker Wheel',
+            entries: NAMED_COLORS.map((c) => `${km ? c.nameKm : c.nameEn} ${c.hex}`),
+          });
+          break;
+        case 'image':
+          updateActiveWheel({
+            title: km ? 'ចាប់រូបភាព (Image Picker)' : 'Image Picker Wheel',
+            entries: imageItems.map((it) => it.label),
+          });
+          break;
+        case 'date': {
+          const now = new Date();
+          const end = new Date();
+          end.setDate(end.getDate() + 14);
+          const toIso = (d: Date) =>
+            `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(
+              d.getDate()
+            ).padStart(2, '0')}`;
+          updateActiveWheel({
+            title: km ? 'ចាប់កាលបរិច្ឆេទ (Date Picker)' : 'Date Picker Wheel',
+            entries: buildDateEntries('range', toIso(now), toIso(end), settings.language),
+          });
+          break;
+        }
+        case 'instagram': {
+          const parsed =
+            instagramParsed.length >= 2
+              ? instagramParsed
+              : parseInstagramComments(SAMPLE_INSTAGRAM_COMMENTS, true, '');
+          setInstagramParsed(parsed);
+          updateActiveWheel({
+            title: km ? 'ចាប់អ្នក Comment (Instagram)' : 'Instagram Comment Picker',
+            entries: parsed.map((p) => p.entryLabel),
+          });
+          break;
+        }
+        case 'mlb':
+          updateActiveWheel({
+            title: km ? 'ក្រុមបេស្បល MLB' : 'MLB Picker Wheel',
+            entries: MLB_TEAMS.map((tm) => tm.name),
+          });
+          break;
+        case 'nba':
+          updateActiveWheel({
+            title: km ? 'ក្រុមបាល់បោះ NBA' : 'NBA Picker Wheel',
+            entries: NBA_TEAMS.map((tm) => tm.name),
+          });
+          break;
+        case 'nfl':
+          updateActiveWheel({
+            title: km ? 'ក្រុមបាល់ឱប NFL' : 'NFL Picker Wheel',
+            entries: NFL_TEAMS.map((tm) => tm.name),
+          });
+          break;
+        case 'flag_quiz':
+          updateActiveWheel({
+            title: km ? 'ល្បែងទាយទង់ជាតិ (Flag Quiz)' : 'Flag Quiz Picker Wheel',
+            entries: WORLD_COUNTRIES.map((c) => c.flag),
+          });
+          break;
+        case 'truth_dare': {
+          const truths = TRUTH_PROMPTS.map((p) => (km ? p.km : p.en));
+          const dares = DARE_PROMPTS.map((p) => (km ? p.km : p.en));
+          const mixed = truths.flatMap((tr, idx) => (dares[idx] ? [tr, dares[idx]] : [tr]));
+          updateActiveWheel({
+            title: km ? 'ការពិត ឬ ហ៊ានធ្វើ (Truth or Dare)' : 'Truth or Dare Picker Wheel',
+            entries: mixed,
+          });
+          break;
+        }
+      }
+    },
+    [
+      activeTool,
+      activeWheel.entries,
+      activeWheel.title,
+      imageItems,
+      instagramParsed,
+      settings.language,
+      updateActiveWheel,
+    ]
+  );
 
   const handleCopyAppLink = useCallback(async () => {
     if (typeof window === 'undefined') return;
@@ -123,6 +310,8 @@ export function PickerwelApp() {
   const handleSpinComplete = useCallback(
     (result: SpinResultPayload) => {
       setWinnerResult(result);
+      setLastToolWinner(result.winner);
+      setToolSpinNonce((n) => n + 1);
       setOutcomeLogged(false);
 
       if (settings.soundEnabled) {
@@ -264,6 +453,12 @@ export function PickerwelApp() {
                 );
               })}
             </div>
+
+            <PickerWheelToolsMenu
+              activeTool={activeTool}
+              language={settings.language}
+              onSelectTool={handleSelectWheelTool}
+            />
 
             <button
               type="button"
@@ -451,6 +646,27 @@ export function PickerwelApp() {
 
         {/* Giant Center Wheel */}
         <div className="flex-1 flex flex-col items-center justify-center py-2 sm:py-4 lg:py-6 gap-3 sm:gap-4">
+          {activeTool !== 'picker' && (
+            <PickerWheelToolDeck
+              activeTool={activeTool}
+              language={settings.language}
+              lastWinner={lastToolWinner}
+              spinNonce={toolSpinNonce}
+              imageItems={imageItems}
+              onChangeImageItems={setImageItems}
+              instagramParsed={instagramParsed}
+              onChangeInstagramParsed={setInstagramParsed}
+              onApplyEntries={(title, entries) =>
+                updateActiveWheel({ title, entries })
+              }
+              onResetToStandardWheel={() => handleSelectWheelTool('picker')}
+              onOpenFullTeams={() => {
+                bumpGroupsSyncKey();
+                setActiveNav('groups');
+              }}
+            />
+          )}
+
           {timeToSpinEnabled && (
             <div className="w-full max-w-xl rounded-2xl bg-white/95 dark:bg-slate-900/95 border border-slate-200 dark:border-slate-800 px-3.5 py-2.5 shadow-sm space-y-2">
               <div className="flex items-center justify-between gap-2">
@@ -659,7 +875,7 @@ export function PickerwelApp() {
               onClick={() => setMobileSheetOpen(true)}
               className="pointer-events-auto w-full min-h-[48px] px-4 py-2.5 rounded-t-2xl bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border border-b-0 border-slate-200 dark:border-slate-800 shadow-lg flex items-center justify-between cursor-pointer"
             >
-              <div className="flex items-center gap-2.5">
+              <span className="flex items-center gap-2.5">
                 <span
                   className="w-8 h-1 rounded-full bg-slate-300 dark:bg-slate-700"
                   aria-hidden="true"
@@ -670,7 +886,7 @@ export function PickerwelApp() {
                 <span className="text-xs text-slate-500 dark:text-slate-400 tabular-nums">
                   ({activeWheel.entries.length})
                 </span>
-              </div>
+              </span>
               <ChevronUp className="w-5 h-5 text-slate-500" />
             </button>
           </div>
@@ -736,15 +952,36 @@ export function PickerwelApp() {
       </div>
 
       {/* Winner Reveal Modal */}
-      <WinnerModal
-        result={winnerResult}
-        wheelTitle={activeWheel.title}
-        language={settings.language}
-        canRemove={activeWheel.entries.length > 1}
-        onRemoveWinner={handleRemoveWinner}
-        onKeepAndSpinAgain={handleKeepAndSpinAgain}
-        onClose={handleCloseWinnerModal}
-      />
+      {(() => {
+        const winnerImg =
+          activeTool === 'image' && winnerResult
+            ? imageItems.find((it) => it.label === winnerResult.winner)
+            : undefined;
+        const winnerClr =
+          activeTool === 'color' && winnerResult
+            ? findColorByEntry(winnerResult.winner)
+            : undefined;
+        const winnerIg =
+          activeTool === 'instagram' && winnerResult
+            ? instagramParsed.find((it) => it.entryLabel === winnerResult.winner)
+            : undefined;
+        return (
+          <WinnerModal
+            result={winnerResult}
+            wheelTitle={activeWheel.title}
+            language={settings.language}
+            canRemove={activeWheel.entries.length > 1}
+            winnerImageUrl={winnerImg?.imageUrl}
+            winnerEmoji={winnerImg?.emoji}
+            winnerEmojiBg={winnerImg?.bgColor}
+            winnerColorHex={winnerClr?.hex}
+            winnerNote={winnerIg?.comment ? `“${winnerIg.comment}”` : undefined}
+            onRemoveWinner={handleRemoveWinner}
+            onKeepAndSpinAgain={handleKeepAndSpinAgain}
+            onClose={handleCloseWinnerModal}
+          />
+        );
+      })()}
 
       {/* Quick Share QR-Code Projector Modal */}
       <QuickQrModal

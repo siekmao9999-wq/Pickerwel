@@ -148,16 +148,28 @@ export function PlayerProfileFormCard({
   onBack,
 }: PlayerProfileFormCardProps) {
   const t = COPY[language];
-  const saved = initialProfile ?? loadGuestPlayerProfile();
 
-  const [name, setName] = useState(saved?.name || '');
-  const [selectedAvatarId, setSelectedAvatarId] = useState(saved?.avatarId || '');
+  const [name, setName] = useState(initialProfile?.name || '');
+  const [selectedAvatarId, setSelectedAvatarId] = useState(initialProfile?.avatarId || '');
   const [customPhotoDataUrl, setCustomPhotoDataUrl] = useState<string | undefined>(
-    saved?.customPhotoDataUrl
+    initialProfile?.customPhotoDataUrl
   );
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const photoInputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    if (initialProfile) return;
+    queueMicrotask(() => {
+      const saved = loadGuestPlayerProfile();
+      if (!saved) return;
+      setName((prev) => prev || saved.name || '');
+      setSelectedAvatarId((prev) => prev || saved.avatarId || '');
+      if (saved.customPhotoDataUrl) {
+        setCustomPhotoDataUrl((prev) => prev ?? saved.customPhotoDataUrl);
+      }
+    });
+  }, [initialProfile]);
 
   const hasName = name.trim().length > 0;
   const hasAvatar =

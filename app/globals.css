@@ -33,6 +33,46 @@
   line-height: 1.35;
 }
 
+/* MathType WYSIWYG interactive equation canvas (MathLive) */
+math-field.mathtype-canvas {
+  display: block;
+  width: 100%;
+  min-height: 92px;
+  padding: 16px 20px;
+  font-size: 1.65rem;
+  line-height: 1.5;
+  color: #0f172a;
+  background: transparent;
+  border: none;
+  outline: none;
+  --caret-color: #2563eb;
+  --selection-background-color: rgba(37, 99, 235, 0.18);
+  --selection-color: #0f172a;
+  --contains-highlight-background-color: rgba(37, 99, 235, 0.08);
+  --placeholder-color: #2563eb;
+  --placeholder-opacity: 0.72;
+  --smart-fence-color: #6366f1;
+}
+
+.dark math-field.mathtype-canvas {
+  color: #f8fafc;
+  --caret-color: #60a5fa;
+  --selection-background-color: rgba(96, 165, 250, 0.25);
+  --selection-color: #ffffff;
+  --contains-highlight-background-color: rgba(96, 165, 250, 0.12);
+  --placeholder-color: #60a5fa;
+  --placeholder-opacity: 0.85;
+}
+
+math-field.mathtype-canvas::part(virtual-keyboard-toggle),
+math-field.mathtype-canvas::part(menu-toggle) {
+  display: none;
+}
+
+math-field.mathtype-canvas::part(content) {
+  padding: 4px 0;
+}
+
 @keyframes wheel-aura {
   0%, 100% {
     opacity: 0.45;

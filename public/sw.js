@@ -1,7 +1,8 @@
-const CACHE_NAME = 'pickerwel-offline-v5';
+const CACHE_NAME = 'pickerwel-offline-v6';
 const APP_SHELL_ASSETS = [
   '/',
   '/wheels',
+  '/forms',
   '/templates',
   '/groups',
   '/tasks',
@@ -18,11 +19,20 @@ const APP_SHELL_ASSETS = [
   '/apple-touch-icon.png',
 ];
 
+const isDevHostName = (hostname) =>
+  hostname === 'localhost' ||
+  hostname === '127.0.0.1' ||
+  hostname.startsWith('ais-dev-');
+
 self.addEventListener('install', (event) => {
+  const devHost = isDevHostName(self.location.hostname);
+  const assetsToPrecache = devHost
+    ? ['/manifest.webmanifest', '/icon.svg', '/pwa-192x192.png', '/pwa-512x512.png', '/apple-touch-icon.png']
+    : APP_SHELL_ASSETS;
   event.waitUntil(
     caches
       .open(CACHE_NAME)
-      .then((cache) => Promise.allSettled(APP_SHELL_ASSETS.map((url) => cache.add(url))))
+      .then((cache) => Promise.allSettled(assetsToPrecache.map((url) => cache.add(url))))
       .catch(() => {})
   );
   self.skipWaiting();
@@ -46,10 +56,7 @@ self.addEventListener('fetch', (event) => {
   if (request.method !== 'GET') return;
 
   const url = new URL(request.url);
-  const isDevHost =
-    url.hostname === 'localhost' ||
-    url.hostname === '127.0.0.1' ||
-    url.hostname.startsWith('ais-dev-');
+  const isDevHost = isDevHostName(url.hostname);
 
   // Skip Firestore / Google Identity API live requests (handled by Firestore IndexedDB persistence)
   if (
@@ -57,6 +64,14 @@ self.addEventListener('fetch', (event) => {
     url.hostname.includes('identitytoolkit.googleapis.com') ||
     url.hostname.includes('securetoken.googleapis.com') ||
     url.pathname.startsWith('/api/')
+  ) {
+    return;
+  }
+
+  // In dev server, bypass SW cache for navigation, Next.js webpack chunks, and RSC payloads to prevent ChunkLoadError
+  if (
+    isDevHost &&
+    (request.mode === 'navigate' || url.pathname.startsWith('/_next/') || url.searchParams.has('_rsc'))
   ) {
     return;
   }
@@ -77,11 +92,6 @@ self.addEventListener('fetch', (event) => {
           return cachedRoot || Response.error();
         })
     );
-    return;
-  }
-
-  // In dev server, bypass SW cache for Next.js webpack chunks and RSC payloads to avoid chunk mismatch errors
-  if (isDevHost && (url.pathname.startsWith('/_next/') || url.searchParams.has('_rsc'))) {
     return;
   }
 

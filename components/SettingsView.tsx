@@ -120,7 +120,7 @@ export function SettingsView() {
                         : 'border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800'
                     }`}
                   >
-                    <div className="flex items-center gap-1 mb-1.5">
+                    <span className="flex items-center gap-1 mb-1.5">
                       {pal.colors.slice(0, 4).map((c) => (
                         <span
                           key={c}
@@ -128,7 +128,7 @@ export function SettingsView() {
                           style={{ backgroundColor: c }}
                         />
                       ))}
-                    </div>
+                    </span>
                     <span className="text-xs font-medium text-slate-800 dark:text-slate-200 block truncate">
                       {isKm ? pal.nameKm : pal.nameEn}
                     </span>

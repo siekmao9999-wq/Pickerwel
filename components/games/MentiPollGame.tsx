@@ -29,6 +29,7 @@ import {
   X,
 } from 'lucide-react';
 import { usePickerwel } from '../PickerwelProvider';
+import { MathText } from '../MathText';
 import {
   STARTER_OFFLINE_POLLS,
   MENTI_CHART_COLORS,
@@ -670,12 +671,12 @@ export function MentiPollGame() {
             </div>
 
             <h3 className="font-display text-xl sm:text-2xl font-bold text-slate-900 dark:text-white leading-snug text-balance">
-              {currentSlide.question}
+              <MathText text={currentSlide.question} explicitOnly />
             </h3>
 
             {currentSlide.subtitle && (
               <p className="text-sm text-slate-500 dark:text-slate-400">
-                {currentSlide.subtitle}
+                <MathText text={currentSlide.subtitle} explicitOnly />
               </p>
             )}
           </div>
@@ -726,8 +727,8 @@ export function MentiPollGame() {
                             style={{ backgroundColor: barColor }}
                             aria-hidden="true"
                           />
-                          <span className="text-sm sm:text-base font-semibold text-slate-800 dark:text-slate-100 truncate">
-                            {opt.label}
+                          <span className="text-sm sm:text-base font-semibold text-slate-800 dark:text-slate-100 break-words">
+                            <MathText text={opt.label} explicitOnly />
                           </span>
                           {isLeading && (
                             <Check
@@ -1066,8 +1067,8 @@ export function MentiPollGame() {
                             >
                               {idx + 1}
                             </span>
-                            <span className="text-sm font-semibold text-slate-800 dark:text-slate-100 truncate">
-                              {opt.label}
+                            <span className="text-sm font-semibold text-slate-800 dark:text-slate-100 break-words">
+                              <MathText text={opt.label} explicitOnly />
                             </span>
                           </span>
                           <span className="text-xs font-mono font-bold text-[#3B82F6] dark:text-blue-400 shrink-0">

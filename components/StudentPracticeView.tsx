@@ -13,10 +13,13 @@ import {
   ArrowLeft,
   BookOpen,
   Pencil,
+  Sigma,
 } from 'lucide-react';
 import { usePickerwel } from './PickerwelProvider';
 import { PickerWheelCanvas, type SpinResultPayload } from './PickerWheelCanvas';
 import { PlayerAvatarBadge, PlayerProfileFormCard } from './PlayerJoinProfileModal';
+import { MathText, hasExplicitMathSyntax } from './MathText';
+import { StemFormulaEditorModal } from './forms/StemFormulaEditorModal';
 import { COPY } from '@/lib/i18n';
 import {
   getStudentAssignment,
@@ -68,6 +71,7 @@ export function StudentPracticeView({ assignmentId }: StudentPracticeViewProps) 
   const [submitting, setSubmitting] = useState(false);
   const [submittedSuccess, setSubmittedSuccess] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [mathTypeOpen, setMathTypeOpen] = useState(false);
 
   const studentName = studentNameDraft ?? (playerProfile?.name || '');
   const hasValidProfile = isValidPlayerProfile(playerProfile);
@@ -208,7 +212,7 @@ export function StudentPracticeView({ assignmentId }: StudentPracticeViewProps) 
           </div>
 
           <h1 className="font-display text-2xl sm:text-3xl font-bold text-slate-900 dark:text-white">
-            {assignment.title}
+            <MathText text={assignment.title} explicitOnly />
           </h1>
 
           <p className="inline-flex items-center gap-1.5 text-xs font-medium text-emerald-700 dark:text-emerald-400">
@@ -217,8 +221,8 @@ export function StudentPracticeView({ assignmentId }: StudentPracticeViewProps) 
           </p>
 
           {assignment.instructions && (
-            <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/70 border border-slate-200/80 dark:border-slate-700/80 text-sm text-slate-700 dark:text-slate-200 whitespace-pre-wrap leading-relaxed">
-              {assignment.instructions}
+            <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/70 border border-slate-200/80 dark:border-slate-700/80 text-sm text-slate-700 dark:text-slate-200 whitespace-pre-wrap leading-relaxed overflow-x-auto">
+              <MathText text={assignment.instructions} explicitOnly />
             </div>
           )}
         </div>
@@ -416,12 +420,27 @@ export function StudentPracticeView({ assignmentId }: StudentPracticeViewProps) 
                   </div>
 
                   <div className="space-y-1.5">
-                    <label
-                      htmlFor="student-answer-input"
-                      className="block text-xs font-semibold text-slate-700 dark:text-slate-300"
-                    >
-                      {t.tasksStudentAnswerLabel} *
-                    </label>
+                    <div className="flex items-center justify-between gap-2">
+                      <label
+                        htmlFor="student-answer-input"
+                        className="block text-xs font-semibold text-slate-700 dark:text-slate-300"
+                      >
+                        {t.tasksStudentAnswerLabel} *
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => setMathTypeOpen(true)}
+                        title={
+                          settings.language === 'km'
+                            ? 'បើក MathType សរសេររូបមន្ត គណិត•រូប•គីមី'
+                            : 'Open MathType Equation Studio'
+                        }
+                        className="min-h-[30px] px-2.5 rounded-lg border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 hover:bg-blue-100/80 text-xs font-semibold inline-flex items-center gap-1 cursor-pointer"
+                      >
+                        <Sigma className="w-3.5 h-3.5" />
+                        <span>MathType</span>
+                      </button>
+                    </div>
                     <textarea
                       id="student-answer-input"
                       required
@@ -432,6 +451,11 @@ export function StudentPracticeView({ assignmentId }: StudentPracticeViewProps) 
                       placeholder={t.tasksStudentAnswerPlaceholder}
                       className="w-full p-3 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-sm text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-y"
                     />
+                    {hasExplicitMathSyntax(answerText) && (
+                      <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/70 border border-slate-200 dark:border-slate-700 text-sm text-slate-800 dark:text-slate-100 whitespace-pre-wrap overflow-x-auto">
+                        <MathText text={answerText} explicitOnly />
+                      </div>
+                    )}
                   </div>
 
                   {submitError && (
@@ -455,6 +479,17 @@ export function StudentPracticeView({ assignmentId }: StudentPracticeViewProps) 
           </div>
         )}
       </div>
+
+      <StemFormulaEditorModal
+        open={mathTypeOpen}
+        language={settings.language}
+        accentColor="#3B82F6"
+        targetLabel={t.tasksStudentAnswerLabel}
+        onClose={() => setMathTypeOpen(false)}
+        onInsert={(formula) =>
+          setAnswerText((prev) => (prev.trim() ? `${prev} ${formula}` : formula))
+        }
+      />
     </div>
   );
 }

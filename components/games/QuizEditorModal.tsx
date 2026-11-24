@@ -1,7 +1,7 @@
 'use client';
 
-import React, { useRef, useState } from 'react';
-import { Plus, Trash2, X, Check } from 'lucide-react';
+import React, { useState } from 'react';
+import { Plus, Trash2, X, Check, Sigma } from 'lucide-react';
 import {
   getSubjectLabel,
   GRADE_GROUPS,
@@ -14,22 +14,12 @@ import {
   type QuizQuestion,
   type SubjectId,
 } from '@/lib/offline-quizzes';
-import { MathText } from '../MathText';
+import { MathText, hasExplicitMathSyntax } from '../MathText';
+import {
+  StemFormulaEditorModal,
+  type FormulaCategoryId,
+} from '../forms/StemFormulaEditorModal';
 import { COPY, type Language } from '@/lib/i18n';
-
-const MATHTYPE_SNIPPETS: { label: string; snippet: string }[] = [
-  { label: 'a/b', snippet: '$\\frac{a}{b}$' },
-  { label: '√x', snippet: '$\\sqrt{x}$' },
-  { label: 'x²', snippet: '$x^2$' },
-  { label: 'xₙ', snippet: '$x_1$' },
-  { label: '×', snippet: '$\\times$' },
-  { label: '÷', snippet: '$\\div$' },
-  { label: 'π', snippet: '$\\pi$' },
-  { label: '°', snippet: '$90^\\circ$' },
-  { label: '≤', snippet: '$\\le$' },
-  { label: '≥', snippet: '$\\ge$' },
-  { label: '≠', snippet: '$\\neq$' },
-];
 
 interface QuizEditorModalProps {
   initialQuiz: OfflineQuiz | null;
@@ -71,20 +61,31 @@ export function QuizEditorModal({
       ? initialQuiz.questions.map((q) => ({ ...q, options: [...q.options] as [string, string, string, string] }))
       : [makeEmptyQuestion()]
   );
-  const activeFieldRef = useRef<{
+  const [mathTypeTarget, setMathTypeTarget] = useState<{
     qIdx: number;
     optIdx: 0 | 1 | 2 | 3 | null;
-  }>({ qIdx: 0, optIdx: null });
+  } | null>(null);
 
-  const handleInsertMathSnippet = (qIdx: number, snippet: string) => {
-    const target = activeFieldRef.current;
-    if (target.qIdx === qIdx && target.optIdx !== null) {
-      const optIdx = target.optIdx;
+  const km = language === 'km';
+  const defaultFormulaCategory: FormulaCategoryId =
+    subjectId === 'physics'
+      ? 'physics'
+      : subjectId === 'chemistry'
+        ? 'chemistry'
+        : 'mathtype';
+
+  const handleInsertFormulaFromMathType = (formattedFormula: string) => {
+    if (!mathTypeTarget) return;
+    const { qIdx, optIdx } = mathTypeTarget;
+    if (optIdx !== null) {
       setQuestions((prev) =>
         prev.map((q, i) => {
           if (i !== qIdx) return q;
           const nextOpts = [...q.options] as [string, string, string, string];
-          nextOpts[optIdx] = `${nextOpts[optIdx]}${nextOpts[optIdx] ? ' ' : ''}${snippet}`;
+          const curr = nextOpts[optIdx];
+          nextOpts[optIdx] = curr.trim()
+            ? `${curr} ${formattedFormula}`
+            : formattedFormula;
           return { ...q, options: nextOpts };
         })
       );
@@ -95,7 +96,7 @@ export function QuizEditorModal({
       prev.map((q, i) => {
         if (i !== qIdx) return q;
         const spacer = q.prompt && !q.prompt.endsWith(' ') ? ' ' : '';
-        return { ...q, prompt: `${q.prompt}${spacer}${snippet}` };
+        return { ...q, prompt: `${q.prompt}${spacer}${formattedFormula}` };
       })
     );
   };
@@ -269,36 +270,27 @@ export function QuizEditorModal({
                   </div>
                 </div>
 
-                <input
-                  type="text"
-                  value={q.prompt}
-                  onFocus={() => {
-                    activeFieldRef.current = { qIdx, optIdx: null };
-                  }}
-                  onChange={(e) => handleUpdateQuestion(qIdx, { prompt: e.target.value })}
-                  placeholder={t.questionPromptLabel}
-                  className="w-full h-10 px-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-sm text-slate-900 dark:text-white"
-                />
-
-                {/* MathType / LaTeX Quick Insert Bar */}
-                <div className="flex flex-wrap items-center gap-1.5">
-                  <span className="text-[11px] font-medium text-slate-500 dark:text-slate-400 mr-1">
-                    {t.mathTypeBarLabel}
-                  </span>
-                  {MATHTYPE_SNIPPETS.map((item) => (
-                    <button
-                      key={item.label}
-                      type="button"
-                      onClick={() => handleInsertMathSnippet(qIdx, item.snippet)}
-                      className="min-h-[28px] px-2 py-0.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 hover:border-blue-400 text-xs font-serif font-semibold text-slate-700 dark:text-slate-200 cursor-pointer"
-                    >
-                      {item.label}
-                    </button>
-                  ))}
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    value={q.prompt}
+                    onChange={(e) => handleUpdateQuestion(qIdx, { prompt: e.target.value })}
+                    placeholder={t.questionPromptLabel}
+                    className="flex-1 h-10 px-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-sm text-slate-900 dark:text-white"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setMathTypeTarget({ qIdx, optIdx: null })}
+                    title={km ? 'បើក MathType សរសេររូបមន្ត គណិត•រូប•គីមី' : 'Open MathType Equation Editor'}
+                    className="min-h-[40px] px-3 rounded-xl border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 hover:bg-blue-100/80 dark:hover:bg-blue-900/40 text-xs font-semibold inline-flex items-center gap-1.5 shrink-0 cursor-pointer"
+                  >
+                    <Sigma className="w-4 h-4" />
+                    <span>MathType</span>
+                  </button>
                 </div>
 
                 {q.prompt.trim().length > 0 && (
-                  <div className="px-3 py-2 rounded-xl bg-white/80 dark:bg-slate-900/70 border border-slate-200/80 dark:border-slate-700/80 text-xs sm:text-sm text-slate-800 dark:text-slate-100">
+                  <div className="px-3 py-2 rounded-xl bg-white/80 dark:bg-slate-900/70 border border-slate-200/80 dark:border-slate-700/80 text-xs sm:text-sm text-slate-800 dark:text-slate-100 overflow-x-auto">
                     <span className="text-[11px] text-slate-400 dark:text-slate-500 mr-2">
                       {t.mathPreviewLabel}
                     </span>
@@ -309,37 +301,49 @@ export function QuizEditorModal({
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                   {([0, 1, 2, 3] as const).map((optIdx) => {
                     const isCorrect = q.correctIndex === optIdx;
+                    const optVal = q.options[optIdx];
                     return (
-                      <div
-                        key={optIdx}
-                        className={`flex items-center gap-2 p-1.5 rounded-xl border ${
-                          isCorrect
-                            ? 'border-emerald-500 bg-emerald-50/70 dark:bg-emerald-950/30'
-                            : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900'
-                        }`}
-                      >
-                        <button
-                          type="button"
-                          onClick={() => handleUpdateQuestion(qIdx, { correctIndex: optIdx })}
-                          aria-label={`${t.correctAnswerLabel} ${optIdx + 1}`}
-                          className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 cursor-pointer transition-colors ${
+                      <div key={optIdx} className="space-y-1">
+                        <div
+                          className={`flex items-center gap-1.5 p-1.5 rounded-xl border ${
                             isCorrect
-                              ? 'bg-emerald-600 text-white'
-                              : 'bg-slate-100 dark:bg-slate-800 text-slate-400'
+                              ? 'border-emerald-500 bg-emerald-50/70 dark:bg-emerald-950/30'
+                              : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900'
                           }`}
                         >
-                          <Check className="w-3.5 h-3.5" />
-                        </button>
-                        <input
-                          type="text"
-                          value={q.options[optIdx]}
-                          onFocus={() => {
-                            activeFieldRef.current = { qIdx, optIdx };
-                          }}
-                          onChange={(e) => handleUpdateOption(qIdx, optIdx, e.target.value)}
-                          placeholder={`Option ${optIdx + 1}`}
-                          className="flex-1 min-w-0 bg-transparent text-xs text-slate-900 dark:text-white focus:outline-none py-1"
-                        />
+                          <button
+                            type="button"
+                            onClick={() => handleUpdateQuestion(qIdx, { correctIndex: optIdx })}
+                            aria-label={`${t.correctAnswerLabel} ${optIdx + 1}`}
+                            className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 cursor-pointer transition-colors ${
+                              isCorrect
+                                ? 'bg-emerald-600 text-white'
+                                : 'bg-slate-100 dark:bg-slate-800 text-slate-400'
+                            }`}
+                          >
+                            <Check className="w-3.5 h-3.5" />
+                          </button>
+                          <input
+                            type="text"
+                            value={optVal}
+                            onChange={(e) => handleUpdateOption(qIdx, optIdx, e.target.value)}
+                            placeholder={`Option ${optIdx + 1}`}
+                            className="flex-1 min-w-0 bg-transparent text-xs text-slate-900 dark:text-white focus:outline-none py-1"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setMathTypeTarget({ qIdx, optIdx })}
+                            title={km ? 'បញ្ចូលរូបមន្ត MathType ក្នុងជម្រើសនេះ' : 'Insert MathType formula'}
+                            className="w-7 h-7 rounded-lg flex items-center justify-center text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/40 shrink-0 cursor-pointer"
+                          >
+                            <Sigma className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                        {hasExplicitMathSyntax(optVal) && (
+                          <div className="px-2.5 py-1 rounded-lg bg-white/80 dark:bg-slate-900/70 border border-slate-200/70 dark:border-slate-700/70 text-xs text-slate-800 dark:text-slate-100 overflow-x-auto">
+                            <MathText text={optVal} explicitOnly />
+                          </div>
+                        )}
                       </div>
                     );
                   })}
@@ -374,6 +378,26 @@ export function QuizEditorModal({
           </button>
         </div>
       </form>
+
+      <StemFormulaEditorModal
+        open={mathTypeTarget !== null}
+        language={language}
+        accentColor="#3B82F6"
+        defaultCategory={defaultFormulaCategory}
+        targetLabel={
+          !mathTypeTarget
+            ? undefined
+            : mathTypeTarget.optIdx !== null
+              ? km
+                ? `សំណួរ #${mathTypeTarget.qIdx + 1} · ជម្រើសទី ${mathTypeTarget.optIdx + 1}`
+                : `Question #${mathTypeTarget.qIdx + 1} · Option ${mathTypeTarget.optIdx + 1}`
+              : km
+                ? `សំណួរ #${mathTypeTarget.qIdx + 1}`
+                : `Question #${mathTypeTarget.qIdx + 1}`
+        }
+        onClose={() => setMathTypeTarget(null)}
+        onInsert={handleInsertFormulaFromMathType}
+      />
     </div>
   );
 }

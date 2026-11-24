@@ -12,12 +12,15 @@ import {
   MessageSquareText,
   ArrowUp,
   ArrowDown,
+  Sigma,
 } from 'lucide-react';
 import type {
   MentiPollDeck,
   MentiSlide,
   MentiSlideType,
 } from '@/lib/offline-polls';
+import { MathText, hasExplicitMathSyntax } from '../MathText';
+import { StemFormulaEditorModal } from '../forms/StemFormulaEditorModal';
 import { COPY, type Language } from '@/lib/i18n';
 
 interface MentiPollEditorModalProps {
@@ -78,6 +81,13 @@ export function MentiPollEditorModal({
         }))
       : [createSlide('multiple_choice')]
   );
+  const [mathTarget, setMathTarget] = useState<
+    | { kind: 'question'; slideIdx: number }
+    | { kind: 'subtitle'; slideIdx: number }
+    | { kind: 'option'; slideIdx: number; optIdx: number }
+    | null
+  >(null);
+  const km = language === 'km';
 
   const slideTypes: {
     id: MentiSlideType;
@@ -351,29 +361,55 @@ export function MentiPollEditorModal({
 
                 {/* Question Prompt & Subtitle */}
                 <div className="grid grid-cols-1 gap-2">
-                  <input
-                    type="text"
-                    required
-                    value={slide.question}
-                    onChange={(e) =>
-                      updateSlide(sIdx, { question: e.target.value })
-                    }
-                    placeholder={
-                      language === 'km'
-                        ? 'សរសេរសំណួរស្ទុងមតិ...'
-                        : 'Enter your poll question...'
-                    }
-                    className="w-full min-h-[42px] px-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500/40"
-                  />
-                  <input
-                    type="text"
-                    value={slide.subtitle || ''}
-                    onChange={(e) =>
-                      updateSlide(sIdx, { subtitle: e.target.value })
-                    }
-                    placeholder={t.mentiSubtitleLabel}
-                    className="w-full min-h-[38px] px-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs text-slate-700 dark:text-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500/40"
-                  />
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      required
+                      value={slide.question}
+                      onChange={(e) =>
+                        updateSlide(sIdx, { question: e.target.value })
+                      }
+                      placeholder={
+                        language === 'km'
+                          ? 'សរសេរសំណួរស្ទុងមតិ (គាំទ្រ MathType)...'
+                          : 'Enter your poll question (supports MathType)...'
+                      }
+                      className="flex-1 min-h-[42px] px-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500/40"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setMathTarget({ kind: 'question', slideIdx: sIdx })}
+                      title={km ? 'បើក MathType សរសេររូបមន្ត គណិត•រូប•គីមី' : 'Open MathType'}
+                      className="min-h-[42px] px-2.5 rounded-xl border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 text-xs font-semibold inline-flex items-center gap-1 shrink-0 cursor-pointer"
+                    >
+                      <Sigma className="w-4 h-4" />
+                      <span>MathType</span>
+                    </button>
+                  </div>
+                  {hasExplicitMathSyntax(slide.question) && (
+                    <div className="px-3 py-1.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-sm text-slate-900 dark:text-white overflow-x-auto">
+                      <MathText text={slide.question} explicitOnly />
+                    </div>
+                  )}
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      value={slide.subtitle || ''}
+                      onChange={(e) =>
+                        updateSlide(sIdx, { subtitle: e.target.value })
+                      }
+                      placeholder={t.mentiSubtitleLabel}
+                      className="flex-1 min-h-[38px] px-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs text-slate-700 dark:text-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500/40"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setMathTarget({ kind: 'subtitle', slideIdx: sIdx })}
+                      title={km ? 'បញ្ចូលរូបមន្ត MathType' : 'Insert MathType formula'}
+                      className="min-h-[38px] min-w-[38px] rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/40 flex items-center justify-center shrink-0 cursor-pointer"
+                    >
+                      <Sigma className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
                 </div>
 
                 {/* Multiple Choice Options */}
@@ -396,29 +432,50 @@ export function MentiPollEditorModal({
                     </div>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                       {(slide.options || []).map((opt, oIdx) => (
-                        <div key={opt.id} className="flex items-center gap-1.5">
-                          <input
-                            type="text"
-                            value={opt.label}
-                            onChange={(e) =>
-                              updateOptionLabel(sIdx, oIdx, e.target.value)
-                            }
-                            placeholder={
-                              language === 'km'
-                                ? `ជម្រើសទី ${oIdx + 1}`
-                                : `Option ${oIdx + 1}`
-                            }
-                            className="flex-1 min-h-[38px] px-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500/40"
-                          />
-                          {(slide.options || []).length > 2 && (
+                        <div key={opt.id} className="space-y-1">
+                          <div className="flex items-center gap-1.5">
+                            <input
+                              type="text"
+                              value={opt.label}
+                              onChange={(e) =>
+                                updateOptionLabel(sIdx, oIdx, e.target.value)
+                              }
+                              placeholder={
+                                language === 'km'
+                                  ? `ជម្រើសទី ${oIdx + 1}`
+                                  : `Option ${oIdx + 1}`
+                              }
+                              className="flex-1 min-h-[38px] px-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500/40"
+                            />
                             <button
                               type="button"
-                              onClick={() => removeOption(sIdx, oIdx)}
-                              aria-label="Remove choice"
-                              className="min-h-[38px] min-w-[34px] rounded-xl flex items-center justify-center text-slate-400 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/30 cursor-pointer"
+                              onClick={() =>
+                                setMathTarget({
+                                  kind: 'option',
+                                  slideIdx: sIdx,
+                                  optIdx: oIdx,
+                                })
+                              }
+                              title={km ? 'បញ្ចូលរូបមន្ត MathType' : 'Insert MathType formula'}
+                              className="min-h-[38px] min-w-[34px] rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/40 flex items-center justify-center shrink-0 cursor-pointer"
                             >
-                              <X className="w-4 h-4" />
+                              <Sigma className="w-3.5 h-3.5" />
                             </button>
+                            {(slide.options || []).length > 2 && (
+                              <button
+                                type="button"
+                                onClick={() => removeOption(sIdx, oIdx)}
+                                aria-label="Remove choice"
+                                className="min-h-[38px] min-w-[34px] rounded-xl flex items-center justify-center text-slate-400 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/30 cursor-pointer"
+                              >
+                                <X className="w-4 h-4" />
+                              </button>
+                            )}
+                          </div>
+                          {hasExplicitMathSyntax(opt.label) && (
+                            <div className="px-2.5 py-1 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-xs text-slate-800 dark:text-slate-100 overflow-x-auto">
+                              <MathText text={opt.label} explicitOnly />
+                            </div>
                           )}
                         </div>
                       ))}
@@ -492,6 +549,39 @@ export function MentiPollEditorModal({
           </button>
         </div>
       </form>
+
+      <StemFormulaEditorModal
+        open={mathTarget !== null}
+        language={language}
+        accentColor="#3B82F6"
+        targetLabel={
+          !mathTarget
+            ? undefined
+            : mathTarget.kind === 'option'
+              ? km
+                ? `ស្លាយទី ${mathTarget.slideIdx + 1} · ជម្រើសទី ${mathTarget.optIdx + 1}`
+                : `Slide ${mathTarget.slideIdx + 1} · Option ${mathTarget.optIdx + 1}`
+              : km
+                ? `ស្លាយទី ${mathTarget.slideIdx + 1}`
+                : `Slide ${mathTarget.slideIdx + 1}`
+        }
+        onClose={() => setMathTarget(null)}
+        onInsert={(formula) => {
+          if (!mathTarget) return;
+          const append = (prev: string) => (prev.trim() ? `${prev} ${formula}` : formula);
+          if (mathTarget.kind === 'question') {
+            const curr = slides[mathTarget.slideIdx]?.question || '';
+            updateSlide(mathTarget.slideIdx, { question: append(curr) });
+          } else if (mathTarget.kind === 'subtitle') {
+            const curr = slides[mathTarget.slideIdx]?.subtitle || '';
+            updateSlide(mathTarget.slideIdx, { subtitle: append(curr) });
+          } else if (mathTarget.kind === 'option') {
+            const curr =
+              slides[mathTarget.slideIdx]?.options?.[mathTarget.optIdx]?.label || '';
+            updateOptionLabel(mathTarget.slideIdx, mathTarget.optIdx, append(curr));
+          }
+        }}
+      />
     </div>
   );
 }

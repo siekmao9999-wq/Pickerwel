@@ -67,6 +67,7 @@ export type NavSection =
   | 'templates'
   | 'groups'
   | 'tasks'
+  | 'forms'
   | 'games'
   | 'stopwatch'
   | 'history'
@@ -80,6 +81,7 @@ export const NAV_ROUTES: Record<NavSection, string> = {
   templates: '/templates',
   groups: '/groups',
   tasks: '/tasks',
+  forms: '/forms',
   games: '/games',
   stopwatch: '/stopwatch',
   history: '/history',
@@ -94,6 +96,7 @@ function navFromPathname(pathname: string | null): NavSection {
   if (pathname.startsWith('/templates')) return 'templates';
   if (pathname.startsWith('/groups')) return 'groups';
   if (pathname.startsWith('/tasks')) return 'tasks';
+  if (pathname.startsWith('/forms')) return 'forms';
   if (pathname.startsWith('/games')) return 'games';
   if (pathname.startsWith('/stopwatch')) return 'stopwatch';
   if (pathname.startsWith('/history')) return 'history';
@@ -203,6 +206,7 @@ interface PickerwelContextValue {
 
   activeNav: NavSection;
   setActiveNav: (nav: NavSection) => void;
+  markPendingNav: (nav: NavSection) => void;
   groupsSyncKey: number;
   bumpGroupsSyncKey: () => void;
 
@@ -229,8 +233,6 @@ interface PickerwelContextValue {
   deleteHistoryItem: (resultId: string) => Promise<void>;
 
   saveStatus: 'saved' | 'saving';
-  hoveredSliceIndex: number | null;
-  setHoveredSliceIndex: (idx: number | null) => void;
 }
 
 const PickerwelContext = createContext<PickerwelContextValue | null>(null);
@@ -251,16 +253,60 @@ export function PickerwelProvider({ children }: { children: React.ReactNode }) {
 
   const pathname = usePathname();
   const router = useRouter();
-  const activeNav = useMemo(() => navFromPathname(pathname), [pathname]);
+  const [pendingNav, setPendingNav] = useState<{
+    target: NavSection;
+    fromPath: string | null;
+  } | null>(null);
+
+  const routeNav = useMemo(() => navFromPathname(pathname), [pathname]);
+  const activeNav =
+    pendingNav && pendingNav.fromPath === pathname ? pendingNav.target : routeNav;
+
+  const markPendingNav = useCallback(
+    (nav: NavSection) => {
+      const target = NAV_ROUTES[nav] || '/';
+      if (pathname !== target) {
+        setPendingNav({ target: nav, fromPath: pathname });
+      }
+    },
+    [pathname]
+  );
+
   const setActiveNav = useCallback(
     (nav: NavSection) => {
       const target = NAV_ROUTES[nav] || '/';
       if (pathname !== target) {
+        setPendingNav({ target: nav, fromPath: pathname });
         router.push(target);
       }
     },
     [pathname, router]
   );
+
+  // Warm up core routes on idle so switching tabs feels instantaneous
+  useEffect(() => {
+    const coreRoutes = [
+      '/',
+      '/wheels',
+      '/templates',
+      '/groups',
+      '/tasks',
+      '/forms',
+      '/games',
+      '/stopwatch',
+      '/history',
+      '/settings',
+    ];
+    const timer = window.setTimeout(() => {
+      for (const route of coreRoutes) {
+        if (route !== pathname) {
+          router.prefetch(route);
+        }
+      }
+    }, 350);
+    return () => window.clearTimeout(timer);
+  }, [pathname, router]);
+
   const [groupsSyncKey, setGroupsSyncKey] = useState(0);
   const bumpGroupsSyncKey = useCallback(() => {
     setGroupsSyncKey((k) => k + 1);
@@ -272,7 +318,6 @@ export function PickerwelProvider({ children }: { children: React.ReactNode }) {
   const [cloudHistory, setCloudHistory] = useState<SpinResultRecord[]>([]);
   const [activeWheelId, setActiveWheelId] = useState<string>('quick_start_wheel');
   const [saveStatus, setSaveStatus] = useState<'saved' | 'saving'>('saved');
-  const [hoveredSliceIndex, setHoveredSliceIndex] = useState<number | null>(null);
   const [hydrated, setHydrated] = useState(false);
 
   const cloudWriteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -929,59 +974,109 @@ export function PickerwelProvider({ children }: { children: React.ReactNode }) {
     }
   }, [cloudHistory, isApprovedCloudUser, user]);
 
+  const contextValue = useMemo<PickerwelContextValue>(
+    () => ({
+      user,
+      userProfile,
+      passcodeSession,
+      isSignedIn,
+      currentDisplayName,
+      isApprovedCloudUser,
+      allUsers,
+      reviewUser,
+      adminPasscodes,
+      passcodeMembers,
+      createPasscode,
+      togglePasscode,
+      removePasscode,
+      reviewPasscodeMember,
+      removePasscodeMember,
+      appAdminName,
+      saveAppAdminName,
+      authReady,
+      authLoading,
+      authError,
+      authModalOpen,
+      prefillPasscode,
+      openAuthModal,
+      closeAuthModal,
+      registerWithPasscode,
+      signInWithGoogle,
+      signOut,
+      activeNav,
+      setActiveNav,
+      markPendingNav,
+      groupsSyncKey,
+      bumpGroupsSyncKey,
+      settings,
+      updateSettings,
+      wheels,
+      activeWheel,
+      selectWheel,
+      updateActiveWheel,
+      createNewWheel,
+      applyTemplate,
+      duplicateWheel,
+      deleteWheel,
+      history,
+      logSpinOutcome,
+      clearHistory,
+      deleteHistoryItem,
+      saveStatus,
+    }),
+    [
+      user,
+      userProfile,
+      passcodeSession,
+      isSignedIn,
+      currentDisplayName,
+      isApprovedCloudUser,
+      allUsers,
+      reviewUser,
+      adminPasscodes,
+      passcodeMembers,
+      createPasscode,
+      togglePasscode,
+      removePasscode,
+      reviewPasscodeMember,
+      removePasscodeMember,
+      appAdminName,
+      saveAppAdminName,
+      authReady,
+      authLoading,
+      authError,
+      authModalOpen,
+      prefillPasscode,
+      openAuthModal,
+      closeAuthModal,
+      registerWithPasscode,
+      signInWithGoogle,
+      signOut,
+      activeNav,
+      setActiveNav,
+      markPendingNav,
+      groupsSyncKey,
+      bumpGroupsSyncKey,
+      settings,
+      updateSettings,
+      wheels,
+      activeWheel,
+      selectWheel,
+      updateActiveWheel,
+      createNewWheel,
+      applyTemplate,
+      duplicateWheel,
+      deleteWheel,
+      history,
+      logSpinOutcome,
+      clearHistory,
+      deleteHistoryItem,
+      saveStatus,
+    ]
+  );
+
   return (
-    <PickerwelContext.Provider
-      value={{
-        user,
-        userProfile,
-        passcodeSession,
-        isSignedIn,
-        currentDisplayName,
-        isApprovedCloudUser,
-        allUsers,
-        reviewUser,
-        adminPasscodes,
-        passcodeMembers,
-        createPasscode,
-        togglePasscode,
-        removePasscode,
-        reviewPasscodeMember,
-        removePasscodeMember,
-        appAdminName,
-        saveAppAdminName,
-        authReady,
-        authLoading,
-        authError,
-        authModalOpen,
-        prefillPasscode,
-        openAuthModal,
-        closeAuthModal,
-        registerWithPasscode,
-        signInWithGoogle,
-        signOut,
-        activeNav,
-        setActiveNav,
-        groupsSyncKey,
-        bumpGroupsSyncKey,
-        settings,
-        updateSettings,
-        wheels,
-        activeWheel,
-        selectWheel,
-        updateActiveWheel,
-        createNewWheel,
-        applyTemplate,
-        duplicateWheel,
-        deleteWheel,
-        history,
-        logSpinOutcome,
-        clearHistory,
-        deleteHistoryItem,
-        saveStatus,
-        hoveredSliceIndex,
-        setHoveredSliceIndex,
-      }}
-    >
+    <PickerwelContext.Provider value={contextValue}>
       {children}
     </PickerwelContext.Provider>
   );
