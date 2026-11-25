@@ -609,6 +609,7 @@ export interface PasscodeMember {
   displayName: string;
   passcode: string;
   status: 'approved' | 'rejected';
+  adminNote?: string;
   createdAtMs: number;
   updatedAtMs: number;
 }
@@ -797,18 +798,61 @@ export async function registerMemberWithPasscode(
 
 export function subscribePasscodeMemberStatus(
   memberId: string,
-  passcode: string,
-  onUpdate: (state: { status: 'approved' | 'rejected'; passcodeActive: boolean }) => void
+  initialPasscode: string,
+  onUpdate: (state: {
+    status: 'approved' | 'rejected';
+    passcodeActive: boolean;
+    displayName?: string;
+    passcode?: string;
+    adminNote?: string;
+  }) => void
 ): Unsubscribe {
   const safeId = sanitizeId(memberId);
-  const safeCode = normalizePasscode(passcode);
+  let activeCode = normalizePasscode(initialPasscode);
 
   let latestMemberStatus: 'approved' | 'rejected' = 'approved';
   let latestPasscodeActive = true;
+  let latestDisplayName: string | undefined;
+  let latestAdminNote: string | undefined;
+  let unsubCode: Unsubscribe | null = null;
 
   const emit = () => {
-    onUpdate({ status: latestMemberStatus, passcodeActive: latestPasscodeActive });
+    onUpdate({
+      status: latestMemberStatus,
+      passcodeActive: latestPasscodeActive,
+      displayName: latestDisplayName,
+      passcode: activeCode,
+      adminNote: latestAdminNote,
+    });
   };
+
+  const watchPasscode = (codeToWatch: string) => {
+    if (unsubCode) {
+      unsubCode();
+      unsubCode = null;
+    }
+    if (!codeToWatch || !VALID_PASSCODE_REGEX.test(codeToWatch)) {
+      latestPasscodeActive = true;
+      emit();
+      return;
+    }
+    unsubCode = onSnapshot(
+      doc(db, 'passcodes', codeToWatch),
+      (snap) => {
+        if (!snap.exists()) {
+          latestPasscodeActive = true;
+        } else {
+          latestPasscodeActive = snap.data().active === true;
+        }
+        emit();
+      },
+      (error) => {
+        handleFirestoreError(error, OperationType.GET, `passcodes/${codeToWatch}`);
+      }
+    );
+  };
+
+  watchPasscode(activeCode);
 
   const unsubMember = onSnapshot(
     doc(db, 'passcodeMembers', safeId),
@@ -818,7 +862,19 @@ export function subscribePasscodeMemberStatus(
           latestMemberStatus = 'rejected';
         }
       } else {
-        latestMemberStatus = snap.data().status === 'rejected' ? 'rejected' : 'approved';
+        const data = snap.data();
+        latestMemberStatus = data.status === 'rejected' ? 'rejected' : 'approved';
+        if (typeof data.displayName === 'string' && data.displayName.trim()) {
+          latestDisplayName = data.displayName.trim().slice(0, 80);
+        }
+        latestAdminNote =
+          typeof data.adminNote === 'string' ? data.adminNote.trim().slice(0, 160) : '';
+        const nextCode =
+          typeof data.passcode === 'string' ? normalizePasscode(data.passcode) : activeCode;
+        if (nextCode && nextCode !== activeCode) {
+          activeCode = nextCode;
+          watchPasscode(activeCode);
+        }
       }
       emit();
     },
@@ -827,26 +883,9 @@ export function subscribePasscodeMemberStatus(
     }
   );
 
-  const unsubCode = onSnapshot(
-    doc(db, 'passcodes', safeCode),
-    (snap) => {
-      if (!snap.exists()) {
-        if (!snap.metadata.fromCache) {
-          latestPasscodeActive = false;
-        }
-      } else {
-        latestPasscodeActive = snap.data().active === true;
-      }
-      emit();
-    },
-    (error) => {
-      handleFirestoreError(error, OperationType.GET, `passcodes/${safeCode}`);
-    }
-  );
-
   return () => {
     unsubMember();
-    unsubCode();
+    if (unsubCode) unsubCode();
   };
 }
 
@@ -865,6 +904,7 @@ export function subscribeAllPasscodeMembers(
           displayName: String(data.displayName || 'Pickerwel User'),
           passcode: String(data.passcode || ''),
           status: data.status === 'rejected' ? 'rejected' : 'approved',
+          adminNote: typeof data.adminNote === 'string' ? data.adminNote : '',
           createdAtMs: toMillis(data.createdAt),
           updatedAtMs: toMillis(data.updatedAt),
         };
@@ -888,6 +928,52 @@ export async function updatePasscodeMemberStatus(
       status,
       updatedAt: serverTimestamp(),
     });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, path);
+  }
+}
+
+export async function updatePasscodeMemberDetails(
+  memberId: string,
+  patch: {
+    displayName?: string;
+    passcode?: string;
+    status?: 'approved' | 'rejected';
+    adminNote?: string;
+  }
+): Promise<void> {
+  const safeId = sanitizeId(memberId);
+  const path = `passcodeMembers/${safeId}`;
+  const updatePayload: Record<string, unknown> = {
+    updatedAt: serverTimestamp(),
+  };
+
+  if (patch.displayName !== undefined) {
+    const cleanedName = patch.displayName.trim().slice(0, 80);
+    if (!cleanedName) {
+      throw new Error('NAME_REQUIRED');
+    }
+    updatePayload.displayName = cleanedName;
+  }
+
+  if (patch.passcode !== undefined) {
+    const cleanedCode = normalizePasscode(patch.passcode);
+    if (!VALID_PASSCODE_REGEX.test(cleanedCode)) {
+      throw new Error('INVALID_PASSCODE_FORMAT');
+    }
+    updatePayload.passcode = cleanedCode;
+  }
+
+  if (patch.status !== undefined) {
+    updatePayload.status = patch.status === 'rejected' ? 'rejected' : 'approved';
+  }
+
+  if (patch.adminNote !== undefined) {
+    updatePayload.adminNote = patch.adminNote.trim().slice(0, 160);
+  }
+
+  try {
+    await updateDoc(doc(db, 'passcodeMembers', safeId), updatePayload);
   } catch (error) {
     handleFirestoreError(error, OperationType.UPDATE, path);
   }
@@ -1149,21 +1235,109 @@ export async function deleteRegistrationRequest(requestId: string): Promise<void
 
 export const DEFAULT_ADMIN_DISPLAY_NAME = 'Siek Mao';
 
+export interface PublicAppConfigData {
+  adminName: string;
+  autoDropEnabled: boolean;
+  defaultPasscode: string;
+}
+
+export async function registerMemberInstantAutoCode(
+  rawName: string
+): Promise<PasscodeMember> {
+  const displayName = rawName.trim().slice(0, 80);
+  if (!displayName) {
+    throw new Error('NAME_REQUIRED');
+  }
+
+  let autoDropEnabled = true;
+  let configuredDefaultCode = '';
+  try {
+    const configSnap = await getDoc(doc(db, 'appConfig', 'public'));
+    if (configSnap.exists()) {
+      const cfg = configSnap.data();
+      if (cfg.autoDropEnabled === false) {
+        autoDropEnabled = false;
+      }
+      if (typeof cfg.defaultPasscode === 'string') {
+        const cleaned = normalizePasscode(cfg.defaultPasscode);
+        if (VALID_PASSCODE_REGEX.test(cleaned)) {
+          configuredDefaultCode = cleaned;
+        }
+      }
+    }
+  } catch {
+    // Fallback to default enabled auto-drop if public config is not yet created
+  }
+
+  if (!autoDropEnabled) {
+    throw new Error('AUTO_DROP_DISABLED');
+  }
+
+  let issuedCode = configuredDefaultCode || generateRandomPasscode('PW-');
+  if (configuredDefaultCode) {
+    try {
+      const codeSnap = await getDoc(doc(db, 'passcodes', configuredDefaultCode));
+      if (codeSnap.exists() && codeSnap.data().active === false) {
+        issuedCode = generateRandomPasscode('PW-');
+      }
+    } catch {
+      // Ignore lookup error and proceed
+    }
+  }
+
+  const memberId = generateMemberId();
+  const memberPath = `passcodeMembers/${memberId}`;
+  try {
+    await setDoc(doc(db, 'passcodeMembers', memberId), {
+      id: memberId,
+      displayName,
+      passcode: issuedCode,
+      status: 'approved',
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+    const now = Date.now();
+    return {
+      id: memberId,
+      displayName,
+      passcode: issuedCode,
+      status: 'approved',
+      createdAtMs: now,
+      updatedAtMs: now,
+    };
+  } catch (error) {
+    handleFirestoreError(error, OperationType.CREATE, memberPath);
+  }
+}
+
 export function subscribePublicAppConfig(
-  onUpdate: (adminName: string) => void
+  onUpdate: (config: PublicAppConfigData) => void
 ): Unsubscribe {
   const path = 'appConfig/public';
   return onSnapshot(
     doc(db, 'appConfig', 'public'),
     (snap) => {
       if (snap.exists()) {
-        const name = String(snap.data().adminName || '').trim().slice(0, 80);
-        if (name) {
-          onUpdate(name);
-          return;
-        }
+        const data = snap.data();
+        const name =
+          String(data.adminName || '').trim().slice(0, 80) || DEFAULT_ADMIN_DISPLAY_NAME;
+        const autoDropEnabled = data.autoDropEnabled !== false;
+        const rawDefault =
+          typeof data.defaultPasscode === 'string'
+            ? normalizePasscode(data.defaultPasscode)
+            : '';
+        onUpdate({
+          adminName: name,
+          autoDropEnabled,
+          defaultPasscode: VALID_PASSCODE_REGEX.test(rawDefault) ? rawDefault : '',
+        });
+        return;
       }
-      onUpdate(DEFAULT_ADMIN_DISPLAY_NAME);
+      onUpdate({
+        adminName: DEFAULT_ADMIN_DISPLAY_NAME,
+        autoDropEnabled: true,
+        defaultPasscode: '',
+      });
     },
     (error) => {
       handleFirestoreError(error, OperationType.GET, path);
@@ -1171,15 +1345,34 @@ export function subscribePublicAppConfig(
   );
 }
 
-export async function updatePublicAdminName(rawName: string): Promise<string> {
-  const adminName = rawName.trim().slice(0, 80) || DEFAULT_ADMIN_DISPLAY_NAME;
+export async function updatePublicAppConfig(input: {
+  adminName: string;
+  autoDropEnabled: boolean;
+  defaultPasscode: string;
+}): Promise<PublicAppConfigData> {
+  const adminName = input.adminName.trim().slice(0, 80) || DEFAULT_ADMIN_DISPLAY_NAME;
+  const rawCode = input.defaultPasscode.trim();
+  let safeCode = '';
+  if (rawCode) {
+    const normalized = normalizePasscode(rawCode);
+    if (!VALID_PASSCODE_REGEX.test(normalized)) {
+      throw new Error('INVALID_PASSCODE_FORMAT');
+    }
+    safeCode = normalized;
+  }
   const path = 'appConfig/public';
   try {
     await setDoc(doc(db, 'appConfig', 'public'), {
       adminName,
+      autoDropEnabled: Boolean(input.autoDropEnabled),
+      defaultPasscode: safeCode,
       updatedAt: serverTimestamp(),
     });
-    return adminName;
+    return {
+      adminName,
+      autoDropEnabled: Boolean(input.autoDropEnabled),
+      defaultPasscode: safeCode,
+    };
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, path);
   }

@@ -367,3 +367,55 @@ export async function deleteCloudFormResponse(
     handleFirestoreError(error, OperationType.DELETE, path);
   }
 }
+
+export function subscribeAllCloudForms(
+  onData: (forms: CustomForm[]) => void
+): Unsubscribe {
+  const path = 'forms';
+  const q = query(collection(db, 'forms'), orderBy('updatedAt', 'desc'));
+  return onSnapshot(
+    q,
+    (snapshot) => {
+      const list = snapshot.docs.map((d) =>
+        parseCloudFormDoc(d.id, d.data() as Record<string, unknown>)
+      );
+      onData(list);
+    },
+    (error) => {
+      handleFirestoreError(error, OperationType.LIST, path);
+    }
+  );
+}
+
+export async function updateCloudFormAdminStatus(
+  formId: string,
+  patch: { published?: boolean; acceptingResponses?: boolean }
+): Promise<void> {
+  const safeId = sanitizeId(formId);
+  const path = `forms/${safeId}`;
+  const updatePayload: Record<string, unknown> = {
+    updatedAt: serverTimestamp(),
+  };
+  if (patch.published !== undefined) {
+    updatePayload.published = Boolean(patch.published);
+  }
+  if (patch.acceptingResponses !== undefined) {
+    updatePayload.acceptingResponses = Boolean(patch.acceptingResponses);
+  }
+  try {
+    await updateDoc(doc(db, 'forms', safeId), updatePayload);
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, path);
+  }
+}
+
+export async function deleteCloudForm(formId: string): Promise<void> {
+  const safeId = sanitizeId(formId);
+  const path = `forms/${safeId}`;
+  try {
+    await deleteDoc(doc(db, 'forms', safeId));
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, path);
+  }
+}
+

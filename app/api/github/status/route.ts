@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import {
-  GITHUB_TOKEN_COOKIE,
   clearGitHubCookies,
   getGitHubCallbackUrl,
   getGitHubClientCredentials,
+  getGitHubTokenFromRequest,
   githubFetch,
   type GitHubUserSummary,
 } from '@/lib/github-oauth';
@@ -11,7 +11,7 @@ import {
 export async function GET(req: NextRequest) {
   const { configured: oauthConfigured } = getGitHubClientCredentials();
   const callbackUrl = getGitHubCallbackUrl();
-  const token = req.cookies.get(GITHUB_TOKEN_COOKIE)?.value;
+  const token = getGitHubTokenFromRequest(req);
 
   if (!token) {
     return NextResponse.json({

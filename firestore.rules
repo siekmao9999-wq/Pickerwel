@@ -49,6 +49,16 @@ service cloud.firestore {
         get(/databases/$(database)/documents/users/$(userId)).data.status == 'approved';
     }
 
+    function isActivePasscodeMember(memberId) {
+      return isValidMemberId(memberId) &&
+        exists(/databases/$(database)/documents/passcodeMembers/$(memberId)) &&
+        get(/databases/$(database)/documents/passcodeMembers/$(memberId)).data.status == 'approved' &&
+        (
+          !exists(/databases/$(database)/documents/passcodes/$(get(/databases/$(database)/documents/passcodeMembers/$(memberId)).data.passcode)) ||
+          get(/databases/$(database)/documents/passcodes/$(get(/databases/$(database)/documents/passcodeMembers/$(memberId)).data.passcode)).data.active == true
+        );
+    }
+
     // Entity Validation Helpers
     function isValidUserProfile(data, userId) {
       return data.keys().hasAll([
@@ -183,12 +193,13 @@ service cloud.firestore {
 
     function isValidPasscodeMember(data, memberId) {
       return data.keys().hasAll(['id', 'displayName', 'passcode', 'status', 'createdAt', 'updatedAt']) &&
-        data.keys().hasOnly(['id', 'displayName', 'passcode', 'status', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['id', 'displayName', 'passcode', 'status', 'adminNote', 'createdAt', 'updatedAt']) &&
         isValidMemberId(data.id) &&
         data.id == memberId &&
         data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 80 &&
         isValidPasscodeId(data.passcode) &&
         data.status in ['approved', 'rejected'] &&
+        (!('adminNote' in data) || (data.adminNote is string && data.adminNote.size() <= 160)) &&
         data.createdAt is timestamp &&
         data.updatedAt is timestamp;
     }
@@ -217,8 +228,10 @@ service cloud.firestore {
 
     function isValidPublicConfig(data) {
       return data.keys().hasAll(['adminName', 'updatedAt']) &&
-        data.keys().hasOnly(['adminName', 'updatedAt']) &&
+        data.keys().hasOnly(['adminName', 'autoDropEnabled', 'defaultPasscode', 'updatedAt']) &&
         data.adminName is string && data.adminName.size() >= 1 && data.adminName.size() <= 80 &&
+        (!('autoDropEnabled' in data) || data.autoDropEnabled is bool) &&
+        (!('defaultPasscode' in data) || (data.defaultPasscode is string && (data.defaultPasscode == '' || isValidPasscodeId(data.defaultPasscode)))) &&
         data.updatedAt is timestamp;
     }
 
@@ -482,19 +495,36 @@ service cloud.firestore {
       allow list: if isAdmin();
       allow create: if isValidMemberId(memberId) &&
         isValidPasscodeMember(incoming(), memberId) &&
+        !('adminNote' in incoming()) &&
         incoming().status == 'approved' &&
         incoming().createdAt == request.time &&
         incoming().updatedAt == request.time &&
-        exists(/databases/$(database)/documents/passcodes/$(incoming().passcode)) &&
-        get(/databases/$(database)/documents/passcodes/$(incoming().passcode)).data.active == true;
+        (
+          (
+            exists(/databases/$(database)/documents/passcodes/$(incoming().passcode)) &&
+            get(/databases/$(database)/documents/passcodes/$(incoming().passcode)).data.active == true
+          ) ||
+          (
+            (
+              !exists(/databases/$(database)/documents/appConfig/public) ||
+              !('autoDropEnabled' in get(/databases/$(database)/documents/appConfig/public).data) ||
+              get(/databases/$(database)/documents/appConfig/public).data.autoDropEnabled == true
+            ) &&
+            (
+              !exists(/databases/$(database)/documents/passcodes/$(incoming().passcode)) ||
+              get(/databases/$(database)/documents/passcodes/$(incoming().passcode)).data.active == true
+            )
+          )
+        );
       allow update: if isValidMemberId(memberId) &&
         isAdmin() &&
         isValidPasscodeMember(incoming(), memberId) &&
         incoming().id == existing().id &&
-        incoming().passcode == existing().passcode &&
         incoming().createdAt == existing().createdAt &&
         incoming().updatedAt == request.time &&
-        incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt']);
+        incoming().diff(existing()).affectedKeys().hasOnly([
+          'displayName', 'passcode', 'status', 'adminNote', 'updatedAt'
+        ]);
       allow delete: if isValidMemberId(memberId) && isAdmin();
     }
 
@@ -560,9 +590,7 @@ service cloud.firestore {
           ) ||
           (
             incoming().ownerType == 'passcode' &&
-            isValidMemberId(incoming().ownerId) &&
-            exists(/databases/$(database)/documents/passcodeMembers/$(incoming().ownerId)) &&
-            get(/databases/$(database)/documents/passcodeMembers/$(incoming().ownerId)).data.status == 'approved'
+            isActivePasscodeMember(incoming().ownerId)
           )
         );
       allow update: if isValidAssignmentId(assignmentId) &&
@@ -646,9 +674,7 @@ service cloud.firestore {
           ) ||
           (
             incoming().ownerType == 'passcode' &&
-            isValidMemberId(incoming().ownerId) &&
-            exists(/databases/$(database)/documents/passcodeMembers/$(incoming().ownerId)) &&
-            get(/databases/$(database)/documents/passcodeMembers/$(incoming().ownerId)).data.status == 'approved'
+            isActivePasscodeMember(incoming().ownerId)
           )
         );
       allow update: if isValidFormId(formId) &&

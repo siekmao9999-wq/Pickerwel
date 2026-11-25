@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import {
+  assertValidCsrfRequest,
   clearGitHubCookies,
   githubFetch,
   setGitHubTokenCookie,
@@ -7,11 +8,15 @@ import {
 } from '@/lib/github-oauth';
 
 export async function POST(req: NextRequest) {
+  if (!assertValidCsrfRequest(req)) {
+    return NextResponse.json({ error: 'FORBIDDEN_ORIGIN' }, { status: 403 });
+  }
+
   try {
     const body = (await req.json()) as { token?: string };
     const token = typeof body?.token === 'string' ? body.token.trim() : '';
 
-    if (!token || token.length < 10 || token.length > 300) {
+    if (!token || token.length < 10 || token.length > 300 || /\s/.test(token)) {
       return NextResponse.json(
         { error: 'INVALID_TOKEN_FORMAT' },
         { status: 400 }
@@ -20,11 +25,19 @@ export async function POST(req: NextRequest) {
 
     const userRes = await githubFetch('/user', token);
     if (!userRes.ok) {
+      const errorCode =
+        userRes.status === 403 &&
+        userRes.headers.get('x-ratelimit-remaining') === '0'
+          ? 'GITHUB_RATE_LIMITED'
+          : 'GITHUB_TOKEN_REJECTED';
+
       const res = NextResponse.json(
-        { error: 'GITHUB_TOKEN_REJECTED' },
-        { status: 401 }
+        { error: errorCode },
+        { status: userRes.status === 403 ? 429 : 401 }
       );
-      clearGitHubCookies(res);
+      if (userRes.status === 401) {
+        clearGitHubCookies(res);
+      }
       return res;
     }
 

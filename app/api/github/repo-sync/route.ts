@@ -1,7 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { GITHUB_TOKEN_COOKIE, githubFetch } from '@/lib/github-oauth';
-
-const SAFE_SEGMENT = /^[a-zA-Z0-9._-]+$/;
+import {
+  assertValidCsrfRequest,
+  encodeGitHubPathSegments,
+  getGitHubTokenFromRequest,
+  githubFetch,
+  isSafeGitHubBranch,
+  isSafeGitHubSegment,
+} from '@/lib/github-oauth';
 
 function slugifyTitle(input: string): string {
   const ascii = input
@@ -14,7 +19,11 @@ function slugifyTitle(input: string): string {
 }
 
 export async function POST(req: NextRequest) {
-  const token = req.cookies.get(GITHUB_TOKEN_COOKIE)?.value;
+  if (!assertValidCsrfRequest(req)) {
+    return NextResponse.json({ error: 'FORBIDDEN_ORIGIN' }, { status: 403 });
+  }
+
+  const token = getGitHubTokenFromRequest(req);
   if (!token) {
     return NextResponse.json({ error: 'NOT_CONNECTED' }, { status: 401 });
   }
@@ -32,8 +41,13 @@ export async function POST(req: NextRequest) {
 
     const owner = body.owner?.trim() || '';
     const repo = body.repo?.trim() || '';
-    if (!SAFE_SEGMENT.test(owner) || !SAFE_SEGMENT.test(repo)) {
+    if (!isSafeGitHubSegment(owner) || !isSafeGitHubSegment(repo)) {
       return NextResponse.json({ error: 'INVALID_REPO' }, { status: 400 });
+    }
+
+    const branch = body.branch?.trim() || '';
+    if (branch && !isSafeGitHubBranch(branch)) {
+      return NextResponse.json({ error: 'INVALID_BRANCH' }, { status: 400 });
     }
 
     const entries = Array.isArray(body.entries)
@@ -50,22 +64,21 @@ export async function POST(req: NextRequest) {
       .replace(/^\/+/, '')
       .replace(/\.\./g, '');
 
-    if (!cleanPath || cleanPath.length > 180) {
+    if (!cleanPath || cleanPath.length > 180 || /[\x00-\x1f\x7f]/.test(cleanPath)) {
       return NextResponse.json({ error: 'INVALID_PATH' }, { status: 400 });
     }
 
-    const encodedPath = cleanPath
-      .split('/')
-      .filter(Boolean)
-      .map((s) => encodeURIComponent(s))
-      .join('/');
+    const encodedPath = encodeGitHubPathSegments(cleanPath);
+    if (!encodedPath) {
+      return NextResponse.json({ error: 'INVALID_PATH' }, { status: 400 });
+    }
 
     const apiPath = `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/contents/${encodedPath}`;
 
     // Check if file already exists to obtain its SHA for updates
     let existingSha: string | undefined;
     const existingRes = await githubFetch(
-      body.branch ? `${apiPath}?ref=${encodeURIComponent(body.branch)}` : apiPath,
+      branch ? `${apiPath}?ref=${encodeURIComponent(branch)}` : apiPath,
       token
     );
     if (existingRes.ok) {
@@ -95,7 +108,7 @@ export async function POST(req: NextRequest) {
           ? `Update Pickerwel wheel: ${title}`
           : `Add Pickerwel wheel: ${title}`,
         content: Buffer.from(jsonContent, 'utf-8').toString('base64'),
-        ...(body.branch ? { branch: body.branch } : {}),
+        ...(branch ? { branch } : {}),
         ...(existingSha ? { sha: existingSha } : {}),
       }),
     });

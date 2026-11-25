@@ -1,5 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { GITHUB_TOKEN_COOKIE, githubFetch } from '@/lib/github-oauth';
+import {
+  assertValidCsrfRequest,
+  getGitHubTokenFromRequest,
+  githubFetch,
+} from '@/lib/github-oauth';
 
 function slugifyTitle(input: string): string {
   const ascii = input
@@ -12,7 +16,7 @@ function slugifyTitle(input: string): string {
 }
 
 export async function GET(req: NextRequest) {
-  const token = req.cookies.get(GITHUB_TOKEN_COOKIE)?.value;
+  const token = getGitHubTokenFromRequest(req);
   if (!token) {
     return NextResponse.json({ error: 'NOT_CONNECTED' }, { status: 401 });
   }
@@ -21,7 +25,7 @@ export async function GET(req: NextRequest) {
 
   try {
     if (gistId) {
-      if (!/^[a-zA-Z0-9]+$/.test(gistId)) {
+      if (!/^[a-zA-Z0-9]{1,64}$/.test(gistId)) {
         return NextResponse.json({ error: 'INVALID_GIST_ID' }, { status: 400 });
       }
       const res = await githubFetch(`/gists/${gistId}`, token);
@@ -89,7 +93,11 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const token = req.cookies.get(GITHUB_TOKEN_COOKIE)?.value;
+  if (!assertValidCsrfRequest(req)) {
+    return NextResponse.json({ error: 'FORBIDDEN_ORIGIN' }, { status: 403 });
+  }
+
+  const token = getGitHubTokenFromRequest(req);
   if (!token) {
     return NextResponse.json({ error: 'NOT_CONNECTED' }, { status: 401 });
   }

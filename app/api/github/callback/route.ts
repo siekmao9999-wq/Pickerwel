@@ -2,31 +2,48 @@ import { NextRequest, NextResponse } from 'next/server';
 import {
   GITHUB_STATE_COOKIE,
   clearGitHubCookies,
+  createOAuthHandoffCode,
+  getAppBaseUrl,
   getGitHubCallbackUrl,
   getGitHubClientCredentials,
   setGitHubTokenCookie,
+  verifySignedOAuthState,
 } from '@/lib/github-oauth';
+
+function safeJsonForInlineScript(value: unknown): string {
+  return JSON.stringify(value)
+    .replace(/</g, '\\u003c')
+    .replace(/>/g, '\\u003e')
+    .replace(/&/g, '\\u0026')
+    .replace(/\u2028/g, '\\u2028')
+    .replace(/\u2029/g, '\\u2029');
+}
 
 function renderPopupResultHtml(opts: {
   ok: boolean;
   errorMessage?: string;
   login?: string;
+  handoffCode?: string;
 }): NextResponse {
   const payload = opts.ok
-    ? JSON.stringify({
+    ? {
         type: 'OAUTH_AUTH_SUCCESS',
         provider: 'github',
         login: opts.login ?? null,
-      })
-    : JSON.stringify({
+        handoffCode: opts.handoffCode ?? null,
+      }
+    : {
         type: 'OAUTH_AUTH_ERROR',
         provider: 'github',
         error: opts.errorMessage || 'GitHub authentication failed',
-      });
+      };
 
   const safeText = opts.ok
     ? 'GitHub connected successfully. This window will close automatically.'
-    : opts.errorMessage || 'GitHub authentication failed. You can close this window and try again.';
+    : opts.errorMessage ||
+      'GitHub authentication failed. You can close this window and try again.';
+
+  const targetOrigin = getAppBaseUrl();
 
   const html = `<!doctype html>
 <html lang="en">
@@ -49,10 +66,15 @@ function renderPopupResultHtml(opts: {
       <button type="button" onclick="window.close()">Close</button>
     </div>
     <script>
-      document.getElementById('status-msg').textContent = ${JSON.stringify(safeText)};
+      document.getElementById('status-msg').textContent = ${safeJsonForInlineScript(safeText)};
       try {
         if (window.opener) {
-          window.opener.postMessage(${payload}, '*');
+          var targetOrigin = ${safeJsonForInlineScript(targetOrigin)};
+          try {
+            window.opener.postMessage(${safeJsonForInlineScript(payload)}, targetOrigin);
+          } catch (originErr) {
+            window.opener.postMessage(${safeJsonForInlineScript(payload)}, window.location.origin);
+          }
           window.close();
         } else {
           window.location.href = '/github';
@@ -87,10 +109,13 @@ export async function GET(req: NextRequest) {
   }
 
   const storedState = req.cookies.get(GITHUB_STATE_COOKIE)?.value;
-  if (storedState && state !== storedState) {
+  const signedStateOk = verifySignedOAuthState(state);
+  const cookieStateOk = Boolean(storedState && state && state === storedState);
+
+  if (!signedStateOk && !cookieStateOk) {
     return renderPopupResultHtml({
       ok: false,
-      errorMessage: 'Invalid OAuth state. Please try connecting again.',
+      errorMessage: 'Invalid or expired OAuth state. Please try connecting again.',
     });
   }
 
@@ -148,9 +173,13 @@ export async function GET(req: NextRequest) {
       ? ((await userRes.json()) as { login?: string })
       : null;
 
+    // Issue single-use short-lived handoff code so cross-origin iframe can establish its own partitioned cookie
+    const handoffCode = createOAuthHandoffCode(tokenJson.access_token);
+
     const response = renderPopupResultHtml({
       ok: true,
       login: userJson?.login,
+      handoffCode,
     });
     clearGitHubCookies(response);
     setGitHubTokenCookie(response, tokenJson.access_token);

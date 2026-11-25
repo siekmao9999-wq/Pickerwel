@@ -42,12 +42,14 @@ import {
   toggleAdminPasscodeActive,
   deleteAdminPasscode,
   updatePasscodeMemberStatus,
+  updatePasscodeMemberDetails,
   deletePasscodeMember,
   BOOTSTRAP_ADMIN_EMAIL,
   isValidPasscodeFormat,
   DEFAULT_ADMIN_DISPLAY_NAME,
   subscribePublicAppConfig,
-  updatePublicAdminName,
+  updatePublicAppConfig,
+  registerMemberInstantAutoCode,
   submitRegistrationRequest,
   subscribeRegistrationRequest,
   subscribeAllRegistrationRequests,
@@ -149,6 +151,7 @@ export interface PasscodeSession {
   passcode: string;
   status: 'approved' | 'rejected';
   passcodeActive: boolean;
+  adminNote?: string;
 }
 
 const STARTER_WHEEL_EPOCH_MS = 1700000000000;
@@ -186,6 +189,7 @@ interface PickerwelContextValue {
   userProfile: UserPreferences | null;
   passcodeSession: PasscodeSession | null;
   isSignedIn: boolean;
+  isAccessBlocked: boolean;
   currentDisplayName: string;
   isApprovedCloudUser: boolean;
   allUsers: UserPreferences[];
@@ -211,9 +215,21 @@ interface PickerwelContextValue {
   togglePasscode: (code: string, active: boolean) => Promise<void>;
   removePasscode: (code: string) => Promise<void>;
   reviewPasscodeMember: (memberId: string, status: 'approved' | 'rejected') => Promise<void>;
+  updatePasscodeMember: (
+    memberId: string,
+    patch: {
+      displayName?: string;
+      passcode?: string;
+      status?: 'approved' | 'rejected';
+      adminNote?: string;
+    }
+  ) => Promise<void>;
   removePasscodeMember: (memberId: string) => Promise<void>;
   appAdminName: string;
   saveAppAdminName: (name: string) => Promise<void>;
+  autoDropEnabled: boolean;
+  defaultAutoCode: string;
+  saveAutoDropConfig: (enabled: boolean, defaultCode: string) => Promise<void>;
 
   authReady: boolean;
   authLoading: boolean;
@@ -222,6 +238,7 @@ interface PickerwelContextValue {
   prefillPasscode: string;
   openAuthModal: () => void;
   closeAuthModal: () => void;
+  registerInstantAutoCode: (name: string) => Promise<PasscodeMember>;
   registerWithPasscode: (name: string, passcode: string) => Promise<void>;
   signInWithGoogle: () => Promise<void>;
   signOut: () => Promise<void>;
@@ -269,6 +286,8 @@ export function PickerwelProvider({ children }: { children: React.ReactNode }) {
   const [registrationRequests, setRegistrationRequests] = useState<RegistrationRequest[]>([]);
   const [pendingRegistration, setPendingRegistration] = useState<RegistrationRequest | null>(null);
   const [appAdminName, setAppAdminName] = useState<string>(DEFAULT_ADMIN_DISPLAY_NAME);
+  const [autoDropEnabled, setAutoDropEnabled] = useState<boolean>(true);
+  const [defaultAutoCode, setDefaultAutoCode] = useState<string>('');
   const [authReady, setAuthReady] = useState(false);
   const [authLoading, setAuthLoading] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
@@ -404,6 +423,8 @@ export function PickerwelProvider({ children }: { children: React.ReactNode }) {
               passcode: parsedSession.passcode,
               status: parsedSession.status === 'rejected' ? 'rejected' : 'approved',
               passcodeActive: parsedSession.passcodeActive !== false,
+              adminNote:
+                typeof parsedSession.adminNote === 'string' ? parsedSession.adminNote : '',
             });
           }
         }
@@ -440,10 +461,12 @@ export function PickerwelProvider({ children }: { children: React.ReactNode }) {
       setHydrated(true);
     });
 
-    const unsubPublicConfig = subscribePublicAppConfig((adminName) => {
-      setAppAdminName(adminName);
+    const unsubPublicConfig = subscribePublicAppConfig((config) => {
+      setAppAdminName(config.adminName);
+      setAutoDropEnabled(config.autoDropEnabled);
+      setDefaultAutoCode(config.defaultPasscode);
       try {
-        localStorage.setItem(STORAGE_KEYS.appAdminName, adminName);
+        localStorage.setItem(STORAGE_KEYS.appAdminName, config.adminName);
       } catch {
         // Ignore quota errors
       }
@@ -642,13 +665,29 @@ export function PickerwelProvider({ children }: { children: React.ReactNode }) {
     const unsub = subscribePasscodeMemberStatus(
       passcodeSession.memberId,
       passcodeSession.passcode,
-      ({ status, passcodeActive }) => {
+      ({ status, passcodeActive, displayName, passcode, adminNote }) => {
         setPasscodeSession((prev) => {
           if (!prev) return null;
-          if (prev.status === status && prev.passcodeActive === passcodeActive) {
+          const nextName = displayName || prev.displayName;
+          const nextCode = passcode || prev.passcode;
+          const nextNote = adminNote !== undefined ? adminNote : prev.adminNote || '';
+          if (
+            prev.status === status &&
+            prev.passcodeActive === passcodeActive &&
+            prev.displayName === nextName &&
+            prev.passcode === nextCode &&
+            (prev.adminNote || '') === nextNote
+          ) {
             return prev;
           }
-          return { ...prev, status, passcodeActive };
+          return {
+            ...prev,
+            status,
+            passcodeActive,
+            displayName: nextName,
+            passcode: nextCode,
+            adminNote: nextNote,
+          };
         });
       }
     );
@@ -717,6 +756,20 @@ export function PickerwelProvider({ children }: { children: React.ReactNode }) {
   const closeAuthModal = useCallback(() => {
     setAuthError(null);
     setAuthModalOpen(false);
+  }, []);
+
+  const registerInstantAutoCode = useCallback(async (name: string) => {
+    setAuthError(null);
+    const member = await registerMemberInstantAutoCode(name);
+    setPasscodeSession({
+      memberId: member.id,
+      displayName: member.displayName,
+      passcode: member.passcode,
+      status: member.status,
+      passcodeActive: true,
+    });
+    setPendingRegistration(null);
+    return member;
   }, []);
 
   const registerWithPasscode = useCallback(async (name: string, passcode: string) => {
@@ -887,6 +940,22 @@ export function PickerwelProvider({ children }: { children: React.ReactNode }) {
     [isAdmin, user]
   );
 
+  const updatePasscodeMember = useCallback(
+    async (
+      memberId: string,
+      patch: {
+        displayName?: string;
+        passcode?: string;
+        status?: 'approved' | 'rejected';
+        adminNote?: string;
+      }
+    ) => {
+      if (!user || !isAdmin) return;
+      await updatePasscodeMemberDetails(memberId, patch);
+    },
+    [isAdmin, user]
+  );
+
   const removePasscodeMember = useCallback(
     async (memberId: string) => {
       if (!user || !isAdmin) return;
@@ -898,18 +967,45 @@ export function PickerwelProvider({ children }: { children: React.ReactNode }) {
   const saveAppAdminName = useCallback(
     async (name: string) => {
       if (!user || !isAdmin) return;
-      const saved = await updatePublicAdminName(name);
-      setAppAdminName(saved);
+      const saved = await updatePublicAppConfig({
+        adminName: name,
+        autoDropEnabled,
+        defaultPasscode: defaultAutoCode,
+      });
+      setAppAdminName(saved.adminName);
+      setAutoDropEnabled(saved.autoDropEnabled);
+      setDefaultAutoCode(saved.defaultPasscode);
       try {
-        localStorage.setItem(STORAGE_KEYS.appAdminName, saved);
+        localStorage.setItem(STORAGE_KEYS.appAdminName, saved.adminName);
       } catch {
         // Ignore quota errors
       }
     },
-    [isAdmin, user]
+    [autoDropEnabled, defaultAutoCode, isAdmin, user]
+  );
+
+  const saveAutoDropConfig = useCallback(
+    async (enabled: boolean, defaultCode: string) => {
+      if (!user || !isAdmin) return;
+      const saved = await updatePublicAppConfig({
+        adminName: appAdminName,
+        autoDropEnabled: enabled,
+        defaultPasscode: defaultCode,
+      });
+      setAppAdminName(saved.adminName);
+      setAutoDropEnabled(saved.autoDropEnabled);
+      setDefaultAutoCode(saved.defaultPasscode);
+    },
+    [appAdminName, isAdmin, user]
   );
 
   const isSignedIn = Boolean(user || passcodeSession);
+  const isAccessBlocked = Boolean(
+    (user && userProfile && userProfile.role !== 'admin' && userProfile.status !== 'approved') ||
+      (!user &&
+        passcodeSession &&
+        (passcodeSession.status === 'rejected' || !passcodeSession.passcodeActive))
+  );
   const currentDisplayName =
     user?.displayName || user?.email?.split('@')[0] || passcodeSession?.displayName || '';
 
@@ -1130,6 +1226,7 @@ export function PickerwelProvider({ children }: { children: React.ReactNode }) {
       userProfile,
       passcodeSession,
       isSignedIn,
+      isAccessBlocked,
       currentDisplayName,
       isApprovedCloudUser,
       allUsers,
@@ -1148,9 +1245,13 @@ export function PickerwelProvider({ children }: { children: React.ReactNode }) {
       togglePasscode,
       removePasscode,
       reviewPasscodeMember,
+      updatePasscodeMember,
       removePasscodeMember,
       appAdminName,
       saveAppAdminName,
+      autoDropEnabled,
+      defaultAutoCode,
+      saveAutoDropConfig,
       authReady,
       authLoading,
       authError,
@@ -1158,6 +1259,7 @@ export function PickerwelProvider({ children }: { children: React.ReactNode }) {
       prefillPasscode,
       openAuthModal,
       closeAuthModal,
+      registerInstantAutoCode,
       registerWithPasscode,
       signInWithGoogle,
       signOut,
@@ -1187,6 +1289,7 @@ export function PickerwelProvider({ children }: { children: React.ReactNode }) {
       userProfile,
       passcodeSession,
       isSignedIn,
+      isAccessBlocked,
       currentDisplayName,
       isApprovedCloudUser,
       allUsers,
@@ -1205,9 +1308,13 @@ export function PickerwelProvider({ children }: { children: React.ReactNode }) {
       togglePasscode,
       removePasscode,
       reviewPasscodeMember,
+      updatePasscodeMember,
       removePasscodeMember,
       appAdminName,
       saveAppAdminName,
+      autoDropEnabled,
+      defaultAutoCode,
+      saveAutoDropConfig,
       authReady,
       authLoading,
       authError,
@@ -1215,6 +1322,7 @@ export function PickerwelProvider({ children }: { children: React.ReactNode }) {
       prefillPasscode,
       openAuthModal,
       closeAuthModal,
+      registerInstantAutoCode,
       registerWithPasscode,
       signInWithGoogle,
       signOut,

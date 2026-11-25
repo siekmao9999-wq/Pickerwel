@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Github,
   Link2,
@@ -19,6 +19,8 @@ import {
   ArrowLeft,
   Search,
   AlertCircle,
+  Info,
+  Globe,
   Loader2,
   RefreshCw,
 } from 'lucide-react';
@@ -81,7 +83,10 @@ function parseEntriesFromGitHubText(filename: string, content: string): {
       const parsed = JSON.parse(content) as unknown;
       if (Array.isArray(parsed)) {
         return {
-          entries: parsed.map((v) => String(v).trim()).filter(Boolean).slice(0, MAX_WHEEL_ENTRIES),
+          entries: parsed
+            .map((v) => String(v).trim())
+            .filter(Boolean)
+            .slice(0, MAX_WHEEL_ENTRIES),
         };
       }
       if (parsed && typeof parsed === 'object') {
@@ -104,22 +109,72 @@ function parseEntriesFromGitHubText(filename: string, content: string): {
   return { entries: parseUserEntriesInput(content, delimiter).entries };
 }
 
+function parsePublicGitHubTarget(raw: string):
+  | { kind: 'repo'; owner: string; repo: string }
+  | { kind: 'user'; username: string }
+  | null {
+  const trimmed = raw.trim().replace(/^@/, '').replace(/\.git$/i, '');
+  if (!trimmed) return null;
+
+  let normalized = trimmed;
+  if (/^https?:\/\//i.test(normalized)) {
+    try {
+      const parsed = new URL(normalized);
+      if (!/^(www\.)?github\.com$/i.test(parsed.hostname)) {
+        return null;
+      }
+      normalized = parsed.pathname.replace(/^\/+|\/+$/g, '');
+    } catch {
+      return null;
+    }
+  } else {
+    normalized = normalized.replace(/^github\.com\//i, '').replace(/^\/+|\/+$/g, '');
+  }
+
+  const parts = normalized.split('/').filter(Boolean);
+  if (parts.length >= 2) {
+    return { kind: 'repo', owner: parts[0], repo: parts[1] };
+  }
+  if (parts.length === 1) {
+    return { kind: 'user', username: parts[0] };
+  }
+  return null;
+}
+
+async function safeReadJson<T>(res: Response): Promise<T | null> {
+  try {
+    return (await res.json()) as T;
+  } catch {
+    return null;
+  }
+}
+
 export function GitHubConnectPanel() {
   const { settings, activeWheel, updateActiveWheel, setActiveNav } = usePickerwel();
   const t = COPY[settings.language];
   const isKm = settings.language === 'km';
+
+  // In-memory only fallback token for cross-origin iframes where browser blocks all cookies.
+  // Never written to localStorage or sessionStorage.
+  const sessionTokenRef = useRef<string | null>(null);
 
   const [statusLoading, setStatusLoading] = useState(true);
   const [status, setStatus] = useState<GitHubStatusResponse | null>(null);
   const [connectingOAuth, setConnectingOAuth] = useState(false);
   const [blockedAuthUrl, setBlockedAuthUrl] = useState<string | null>(null);
 
-  const [patOpen, setPatOpen] = useState(false);
+  const [connectMethod, setConnectMethod] = useState<'pat' | 'public'>('pat');
   const [patInput, setPatInput] = useState('');
   const [patSubmitting, setPatSubmitting] = useState(false);
 
+  // Public read-only GitHub connection (no token required)
+  const [publicInput, setPublicInput] = useState('');
+  const [publicSubmitting, setPublicSubmitting] = useState(false);
+  const [publicUser, setPublicUser] = useState<GitHubUser | null>(null);
+
   const [copiedCallback, setCopiedCallback] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [infoMsg, setInfoMsg] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [successLink, setSuccessLink] = useState<string | null>(null);
 
@@ -140,53 +195,71 @@ export function GitHubConnectPanel() {
   const [savingGist, setSavingGist] = useState(false);
   const [loadingGistId, setLoadingGistId] = useState<string | null>(null);
 
+  const isAuthConnected = Boolean(status?.connected && status.user);
+  const activeUser = isAuthConnected ? status?.user ?? null : publicUser;
+  const isWorkspaceConnected = Boolean(activeUser);
+
+  const apiFetch = useCallback((input: string, init: RequestInit = {}) => {
+    const headers = new Headers(init.headers);
+    headers.set('X-Requested-With', 'XMLHttpRequest');
+    if (sessionTokenRef.current && !headers.has('Authorization')) {
+      headers.set('Authorization', `Bearer ${sessionTokenRef.current}`);
+    }
+    return fetch(input, {
+      ...init,
+      headers,
+      credentials: 'include',
+      cache: 'no-store',
+    });
+  }, []);
+
   const fetchRepos = useCallback(async () => {
     setReposLoading(true);
     try {
-      const res = await fetch('/api/github/repos');
+      const res = await apiFetch('/api/github/repos');
       if (!res.ok) return;
-      const data = (await res.json()) as { repos?: RepoSummary[] };
-      setRepos(Array.isArray(data.repos) ? data.repos : []);
+      const data = await safeReadJson<{ repos?: RepoSummary[] }>(res);
+      setRepos(Array.isArray(data?.repos) ? data.repos : []);
     } finally {
       setReposLoading(false);
     }
-  }, []);
+  }, [apiFetch]);
 
   const fetchGists = useCallback(async () => {
     setGistsLoading(true);
     try {
-      const res = await fetch('/api/github/gists');
+      const res = await apiFetch('/api/github/gists');
       if (!res.ok) return;
-      const data = (await res.json()) as { gists?: GistSummary[] };
-      setGists(Array.isArray(data.gists) ? data.gists : []);
+      const data = await safeReadJson<{ gists?: GistSummary[] }>(res);
+      setGists(Array.isArray(data?.gists) ? data.gists : []);
     } finally {
       setGistsLoading(false);
     }
-  }, []);
+  }, [apiFetch]);
 
   const fetchStatus = useCallback(async () => {
     try {
-      const res = await fetch('/api/github/status', { cache: 'no-store' });
+      const res = await apiFetch('/api/github/status');
       if (!res.ok) return;
-      const data = (await res.json()) as GitHubStatusResponse;
+      const data = await safeReadJson<GitHubStatusResponse>(res);
+      if (!data) return;
       setStatus(data);
       if (data.connected) {
+        setPublicUser(null);
         await Promise.all([fetchRepos(), fetchGists()]);
       } else {
-        setRepos([]);
         setGists([]);
-        setSelectedRepo(null);
       }
     } finally {
       setStatusLoading(false);
     }
-  }, [fetchRepos, fetchGists]);
+  }, [apiFetch, fetchRepos, fetchGists]);
 
   useEffect(() => {
     void fetchStatus();
   }, [fetchStatus]);
 
-  // Listen for OAuth popup postMessage completion
+  // Listen for OAuth popup postMessage completion and exchange one-time handoff code
   useEffect(() => {
     const handleMessage = (event: MessageEvent) => {
       const origin = event.origin || '';
@@ -196,14 +269,54 @@ export function GitHubConnectPanel() {
         origin === window.location.origin;
       if (!validOrigin) return;
 
-      if (event.data?.type === 'OAUTH_AUTH_SUCCESS' && event.data?.provider === 'github') {
+      if (
+        event.data?.type === 'OAUTH_AUTH_SUCCESS' &&
+        event.data?.provider === 'github'
+      ) {
         setConnectingOAuth(false);
         setBlockedAuthUrl(null);
         setErrorMsg(null);
+        setInfoMsg(null);
         setSuccessLink(null);
-        setSuccessMsg(t.ghConnectedBadge);
-        void fetchStatus();
-      } else if (event.data?.type === 'OAUTH_AUTH_ERROR' && event.data?.provider === 'github') {
+
+        const handoffCode =
+          typeof event.data?.handoffCode === 'string'
+            ? event.data.handoffCode
+            : null;
+
+        void (async () => {
+          if (handoffCode) {
+            const sessionRes = await apiFetch('/api/github/session', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ handoffCode }),
+            });
+            const sessionData = await safeReadJson<{
+              connected?: boolean;
+              scopes?: string[];
+              user?: GitHubUser;
+            }>(sessionRes);
+            if (sessionRes.ok && sessionData?.connected && sessionData.user) {
+              setPublicUser(null);
+              setStatus((prev) => ({
+                oauthConfigured: prev?.oauthConfigured ?? true,
+                callbackUrl: prev?.callbackUrl ?? '',
+                connected: true,
+                scopes: sessionData.scopes ?? [],
+                user: sessionData.user ?? null,
+              }));
+              setSuccessMsg(t.ghConnectedBadge);
+              await Promise.all([fetchRepos(), fetchGists()]);
+              return;
+            }
+          }
+          setSuccessMsg(t.ghConnectedBadge);
+          await fetchStatus();
+        })();
+      } else if (
+        event.data?.type === 'OAUTH_AUTH_ERROR' &&
+        event.data?.provider === 'github'
+      ) {
         setConnectingOAuth(false);
         setErrorMsg(
           typeof event.data?.error === 'string' ? event.data.error : t.ghApiError
@@ -213,28 +326,34 @@ export function GitHubConnectPanel() {
 
     window.addEventListener('message', handleMessage);
     return () => window.removeEventListener('message', handleMessage);
-  }, [fetchStatus, t.ghConnectedBadge, t.ghApiError]);
+  }, [apiFetch, fetchGists, fetchRepos, fetchStatus, t.ghConnectedBadge, t.ghApiError]);
 
   const handleConnectOAuth = async () => {
     setErrorMsg(null);
+    setInfoMsg(null);
     setSuccessMsg(null);
     setSuccessLink(null);
     setBlockedAuthUrl(null);
     setConnectingOAuth(true);
 
     try {
-      const res = await fetch('/api/github/auth-url', { cache: 'no-store' });
-      const data = (await res.json()) as {
+      const res = await apiFetch('/api/github/auth-url');
+      const data = await safeReadJson<{
+        configured?: boolean;
         url?: string;
         error?: string;
         callbackUrl?: string;
-      };
+      }>(res);
 
-      if (!res.ok || !data.url) {
+      if (
+        !data ||
+        data.configured === false ||
+        data.error === 'OAUTH_NOT_CONFIGURED' ||
+        !data.url
+      ) {
         setConnectingOAuth(false);
-        if (data.error === 'OAUTH_NOT_CONFIGURED') {
-          setPatOpen(true);
-          setErrorMsg(t.ghOAuthMissingHint);
+        if (data?.error === 'OAUTH_NOT_CONFIGURED' || data?.configured === false) {
+          setInfoMsg(t.ghOAuthMissingHint);
         } else {
           setErrorMsg(t.ghApiError);
         }
@@ -250,7 +369,7 @@ export function GitHubConnectPanel() {
       if (!authWindow) {
         setConnectingOAuth(false);
         setBlockedAuthUrl(data.url);
-        setErrorMsg(t.ghPopupBlockedHint);
+        setInfoMsg(t.ghPopupBlockedHint);
       }
     } catch {
       setConnectingOAuth(false);
@@ -260,28 +379,57 @@ export function GitHubConnectPanel() {
 
   const handleConnectPat = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!patInput.trim() || patSubmitting) return;
+    const cleanedToken = patInput.trim();
+    if (!cleanedToken || patSubmitting) return;
     setErrorMsg(null);
+    setInfoMsg(null);
     setSuccessMsg(null);
     setSuccessLink(null);
     setPatSubmitting(true);
 
     try {
-      const res = await fetch('/api/github/token', {
+      const res = await apiFetch('/api/github/token', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ token: patInput.trim() }),
+        body: JSON.stringify({ token: cleanedToken }),
       });
+      const data = await safeReadJson<{
+        connected?: boolean;
+        scopes?: string[];
+        user?: GitHubUser;
+        error?: string;
+      }>(res);
 
-      if (!res.ok) {
-        setErrorMsg(t.ghTokenError);
+      if (!res.ok || !data?.connected || !data.user) {
+        if (data?.error === 'GITHUB_RATE_LIMITED') {
+          setErrorMsg(t.ghRateLimitError);
+        } else if (
+          data?.error === 'INVALID_TOKEN_FORMAT' ||
+          data?.error === 'GITHUB_TOKEN_REJECTED' ||
+          res.status === 400 ||
+          res.status === 401
+        ) {
+          setErrorMsg(t.ghTokenError);
+        } else {
+          setErrorMsg(t.ghApiError);
+        }
         return;
       }
 
+      // Hold in React memory only as fallback if the browser strips iframe cookies
+      sessionTokenRef.current = cleanedToken;
       setPatInput('');
-      setPatOpen(false);
+      setPublicUser(null);
+      setSelectedRepo(null);
+      setStatus((prev) => ({
+        oauthConfigured: prev?.oauthConfigured ?? false,
+        callbackUrl: prev?.callbackUrl ?? '',
+        connected: true,
+        scopes: data.scopes ?? [],
+        user: data.user ?? null,
+      }));
       setSuccessMsg(t.ghConnectedBadge);
-      await fetchStatus();
+      await Promise.all([fetchRepos(), fetchGists()]);
     } catch {
       setErrorMsg(t.ghApiError);
     } finally {
@@ -289,11 +437,103 @@ export function GitHubConnectPanel() {
     }
   };
 
-  const handleDisconnect = async () => {
+  const handleConnectPublic = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const parsed = parsePublicGitHubTarget(publicInput);
+    if (!parsed || publicSubmitting) {
+      setErrorMsg(t.ghPublicNotFound);
+      return;
+    }
+
     setErrorMsg(null);
+    setInfoMsg(null);
     setSuccessMsg(null);
     setSuccessLink(null);
-    await fetch('/api/github/logout', { method: 'POST' });
+    setPublicSubmitting(true);
+
+    try {
+      if (parsed.kind === 'repo') {
+        const res = await apiFetch(
+          `/api/github/repos?action=public-repo&owner=${encodeURIComponent(parsed.owner)}&repo=${encodeURIComponent(parsed.repo)}`
+        );
+        const data = await safeReadJson<{ repo?: RepoSummary; error?: string }>(res);
+        if (!res.ok || !data?.repo) {
+          setErrorMsg(
+            data?.error === 'GITHUB_RATE_LIMITED'
+              ? t.ghRateLimitError
+              : data?.error === 'GITHUB_REPO_NOT_FOUND' || res.status === 404
+                ? t.ghPublicNotFound
+                : t.ghApiError
+          );
+          return;
+        }
+        const ownerProfileRes = await apiFetch(
+          `/api/github/repos?action=public-profile&username=${encodeURIComponent(data.repo.owner)}`
+        );
+        const ownerData = await safeReadJson<{ user?: GitHubUser; repos?: RepoSummary[] }>(
+          ownerProfileRes
+        );
+        setPublicUser(
+          ownerData?.user ?? {
+            login: data.repo.owner,
+            name: data.repo.owner,
+            avatar_url: '',
+            html_url: `https://github.com/${data.repo.owner}`,
+            public_repos: 1,
+          }
+        );
+        const mergedRepos = ownerData?.repos?.some((r) => r.id === data.repo!.id)
+          ? ownerData.repos
+          : [data.repo, ...(ownerData?.repos ?? [])];
+        setRepos(mergedRepos);
+        setActiveTab('repos');
+        setSuccessMsg(t.ghPublicConnectedBadge);
+        await handleBrowseRepo(data.repo, '');
+      } else {
+        const res = await apiFetch(
+          `/api/github/repos?action=public-profile&username=${encodeURIComponent(parsed.username)}`
+        );
+        const data = await safeReadJson<{
+          user?: GitHubUser;
+          repos?: RepoSummary[];
+          error?: string;
+        }>(res);
+        if (!res.ok || !data?.user) {
+          setErrorMsg(
+            data?.error === 'GITHUB_RATE_LIMITED'
+              ? t.ghRateLimitError
+              : data?.error === 'GITHUB_USER_NOT_FOUND' || res.status === 404
+                ? t.ghPublicNotFound
+                : t.ghApiError
+          );
+          return;
+        }
+        setPublicUser(data.user);
+        setRepos(Array.isArray(data.repos) ? data.repos : []);
+        setSelectedRepo(null);
+        setActiveTab('repos');
+        setSuccessMsg(t.ghPublicConnectedBadge);
+      }
+    } catch {
+      setErrorMsg(t.ghApiError);
+    } finally {
+      setPublicSubmitting(false);
+    }
+  };
+
+  const handleDisconnect = async () => {
+    setErrorMsg(null);
+    setInfoMsg(null);
+    setSuccessMsg(null);
+    setSuccessLink(null);
+    sessionTokenRef.current = null;
+    setPublicUser(null);
+    setRepos([]);
+    setGists([]);
+    setSelectedRepo(null);
+    setRepoItems([]);
+    setRepoPath('');
+    await apiFetch('/api/github/logout', { method: 'POST' }).catch(() => {});
     await fetchStatus();
   };
 
@@ -305,17 +545,22 @@ export function GitHubConnectPanel() {
   };
 
   const handlePushWheelToRepo = async (repo: RepoSummary) => {
+    if (!isAuthConnected) {
+      setInfoMsg(t.ghReadOnlyNotice);
+      return;
+    }
     if (activeWheel.entries.length === 0) {
       setErrorMsg(t.ghEmptyWheelWarn);
       return;
     }
     setErrorMsg(null);
+    setInfoMsg(null);
     setSuccessMsg(null);
     setSuccessLink(null);
     setPushingRepoId(repo.id);
 
     try {
-      const res = await fetch('/api/github/repo-sync', {
+      const res = await apiFetch('/api/github/repo-sync', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -327,13 +572,13 @@ export function GitHubConnectPanel() {
           paletteId: activeWheel.paletteId,
         }),
       });
-      const data = (await res.json()) as {
+      const data = await safeReadJson<{
         ok?: boolean;
         htmlUrl?: string;
         detail?: string;
-      };
-      if (!res.ok || !data.ok) {
-        setErrorMsg(data.detail || t.ghApiError);
+      }>(res);
+      if (!res.ok || !data?.ok) {
+        setErrorMsg(data?.detail || t.ghApiError);
         return;
       }
       setSuccessMsg(t.ghPushSuccess);
@@ -347,16 +592,19 @@ export function GitHubConnectPanel() {
 
   const handleImportContributors = async (repo: RepoSummary) => {
     setErrorMsg(null);
+    setInfoMsg(null);
     setSuccessMsg(null);
     setSuccessLink(null);
     setRepoActionLoading(true);
     try {
-      const res = await fetch(
+      const res = await apiFetch(
         `/api/github/repos?action=contributors&owner=${encodeURIComponent(repo.owner)}&repo=${encodeURIComponent(repo.name)}`
       );
-      const data = (await res.json()) as { contributors?: string[] };
-      if (!res.ok || !Array.isArray(data.contributors) || data.contributors.length === 0) {
-        setErrorMsg(t.ghApiError);
+      const data = await safeReadJson<{ contributors?: string[]; error?: string }>(res);
+      if (!res.ok || !Array.isArray(data?.contributors) || data.contributors.length === 0) {
+        setErrorMsg(
+          data?.error === 'GITHUB_RATE_LIMITED' ? t.ghRateLimitError : t.ghApiError
+        );
         return;
       }
       const nextEntries = data.contributors.slice(0, MAX_WHEEL_ENTRIES);
@@ -377,16 +625,19 @@ export function GitHubConnectPanel() {
     setRepoPath(path);
     setRepoActionLoading(true);
     setErrorMsg(null);
+    setInfoMsg(null);
     try {
-      const res = await fetch(
+      const res = await apiFetch(
         `/api/github/repos?action=contents&owner=${encodeURIComponent(repo.owner)}&repo=${encodeURIComponent(repo.name)}&path=${encodeURIComponent(path)}`
       );
-      const data = (await res.json()) as { items?: RepoContentItem[] };
+      const data = await safeReadJson<{ items?: RepoContentItem[]; error?: string }>(res);
       if (!res.ok) {
-        setErrorMsg(t.ghApiError);
+        setErrorMsg(
+          data?.error === 'GITHUB_RATE_LIMITED' ? t.ghRateLimitError : t.ghApiError
+        );
         return;
       }
-      setRepoItems(Array.isArray(data.items) ? data.items : []);
+      setRepoItems(Array.isArray(data?.items) ? data.items : []);
     } catch {
       setErrorMsg(t.ghApiError);
     } finally {
@@ -397,16 +648,20 @@ export function GitHubConnectPanel() {
   const handleImportRepoFile = async (repo: RepoSummary, item: RepoContentItem) => {
     setRepoActionLoading(true);
     setErrorMsg(null);
+    setInfoMsg(null);
     setSuccessMsg(null);
     try {
-      const res = await fetch(
+      const res = await apiFetch(
         `/api/github/repos?action=file&owner=${encodeURIComponent(repo.owner)}&repo=${encodeURIComponent(repo.name)}&path=${encodeURIComponent(item.path)}`
       );
-      const data = (await res.json()) as {
+      const data = await safeReadJson<{
         file?: { name: string; content: string };
-      };
-      if (!res.ok || !data.file) {
-        setErrorMsg(t.ghApiError);
+        error?: string;
+      }>(res);
+      if (!res.ok || !data?.file) {
+        setErrorMsg(
+          data?.error === 'GITHUB_RATE_LIMITED' ? t.ghRateLimitError : t.ghApiError
+        );
         return;
       }
       const parsed = parseEntriesFromGitHubText(data.file.name, data.file.content);
@@ -427,16 +682,21 @@ export function GitHubConnectPanel() {
   };
 
   const handleBackupToGist = async () => {
+    if (!isAuthConnected) {
+      setInfoMsg(t.ghReadOnlyNotice);
+      return;
+    }
     if (activeWheel.entries.length === 0) {
       setErrorMsg(t.ghEmptyWheelWarn);
       return;
     }
     setSavingGist(true);
     setErrorMsg(null);
+    setInfoMsg(null);
     setSuccessMsg(null);
     setSuccessLink(null);
     try {
-      const res = await fetch('/api/github/gists', {
+      const res = await apiFetch('/api/github/gists', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -446,9 +706,9 @@ export function GitHubConnectPanel() {
           isPublic: gistPublic,
         }),
       });
-      const data = (await res.json()) as { gist?: GistSummary };
-      if (!res.ok || !data.gist) {
-        setErrorMsg(t.ghApiError);
+      const data = await safeReadJson<{ gist?: GistSummary; detail?: string }>(res);
+      if (!res.ok || !data?.gist) {
+        setErrorMsg(data?.detail || t.ghApiError);
         return;
       }
       setGists((prev) => [data.gist!, ...prev]);
@@ -464,13 +724,16 @@ export function GitHubConnectPanel() {
   const handleLoadGist = async (gist: GistSummary) => {
     setLoadingGistId(gist.id);
     setErrorMsg(null);
+    setInfoMsg(null);
     setSuccessMsg(null);
     try {
-      const res = await fetch(`/api/github/gists?gistId=${encodeURIComponent(gist.id)}`);
-      const data = (await res.json()) as {
+      const res = await apiFetch(
+        `/api/github/gists?gistId=${encodeURIComponent(gist.id)}`
+      );
+      const data = await safeReadJson<{
         gist?: { files: Array<{ filename: string; content: string }> };
-      };
-      const files = data.gist?.files || [];
+      }>(res);
+      const files = data?.gist?.files || [];
       const jsonFile = files.find((f) => f.filename.toLowerCase().endsWith('.json'));
       const candidate = jsonFile || files[0];
       if (!candidate) {
@@ -536,23 +799,32 @@ export function GitHubConnectPanel() {
         </div>
 
         {/* Feedback banners */}
-        {errorMsg && (
-          <div className="p-4 rounded-2xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900 text-sm text-rose-700 dark:text-rose-300 space-y-2">
+        {infoMsg && (
+          <div className="p-4 rounded-2xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900 text-sm text-amber-800 dark:text-amber-200 space-y-2.5">
             <div className="flex items-start gap-2.5">
-              <AlertCircle className="w-5 h-5 shrink-0 mt-0.5" />
-              <span>{errorMsg}</span>
+              <Info className="w-5 h-5 shrink-0 mt-0.5 text-amber-600 dark:text-amber-400" />
+              <span className="leading-relaxed">{infoMsg}</span>
             </div>
             {blockedAuthUrl && (
               <a
                 href={blockedAuthUrl}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-semibold whitespace-nowrap"
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-semibold whitespace-nowrap"
               >
                 <ExternalLink className="w-3.5 h-3.5 shrink-0" />
                 <span>{t.ghOpenUrlFallback}</span>
               </a>
             )}
+          </div>
+        )}
+
+        {errorMsg && (
+          <div className="p-4 rounded-2xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900 text-sm text-rose-700 dark:text-rose-300 space-y-2">
+            <div className="flex items-start gap-2.5">
+              <AlertCircle className="w-5 h-5 shrink-0 mt-0.5" />
+              <span className="leading-relaxed">{errorMsg}</span>
+            </div>
           </div>
         )}
 
@@ -583,68 +855,90 @@ export function GitHubConnectPanel() {
               <Loader2 className="w-5 h-5 animate-spin text-[#3B82F6]" />
               <span>{t.ghConnecting}</span>
             </div>
-          ) : status?.connected && status.user ? (
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-              <div className="flex items-center gap-3.5 min-w-0">
-                <div className="w-12 h-12 rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden shrink-0 border border-slate-200 dark:border-slate-700 flex items-center justify-center font-bold text-slate-700 dark:text-slate-200">
-                  {status.user.avatar_url ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={status.user.avatar_url}
-                      alt={status.user.login}
-                      referrerPolicy="no-referrer"
-                      className="w-full h-full object-cover"
-                    />
-                  ) : (
-                    status.user.login.slice(0, 1).toUpperCase()
-                  )}
-                </div>
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2">
-                    <span className="font-display text-base font-bold text-slate-900 dark:text-white truncate">
-                      {status.user.name || status.user.login}
-                    </span>
-                    <a
-                      href={status.user.html_url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-xs font-mono text-[#3B82F6] hover:underline inline-flex items-center gap-1 shrink-0"
-                    >
-                      @{status.user.login}
-                      <ExternalLink className="w-3 h-3" />
-                    </a>
+          ) : isWorkspaceConnected && activeUser ? (
+            <div className="space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div className="flex items-center gap-3.5 min-w-0">
+                  <div className="w-12 h-12 rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden shrink-0 border border-slate-200 dark:border-slate-700 flex items-center justify-center font-bold text-slate-700 dark:text-slate-200">
+                    {activeUser.avatar_url ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={activeUser.avatar_url}
+                        alt={activeUser.login}
+                        referrerPolicy="no-referrer"
+                        className="w-full h-full object-cover"
+                      />
+                    ) : (
+                      activeUser.login.slice(0, 1).toUpperCase()
+                    )}
                   </div>
-                  <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400 tabular-nums">
-                    {t.ghConnectedBadge}
-                    {' · '}
-                    {status.user.public_repos} {isKm ? 'repos សាធារណៈ' : 'public repos'}
-                  </p>
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-display text-base font-bold text-slate-900 dark:text-white truncate">
+                        {activeUser.name || activeUser.login}
+                      </span>
+                      <a
+                        href={activeUser.html_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-xs font-mono text-[#3B82F6] hover:underline inline-flex items-center gap-1 shrink-0"
+                      >
+                        @{activeUser.login}
+                        <ExternalLink className="w-3 h-3" />
+                      </a>
+                    </div>
+                    <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400 tabular-nums">
+                      {isAuthConnected ? t.ghConnectedBadge : t.ghPublicConnectedBadge}
+                      {' · '}
+                      {activeUser.public_repos}{' '}
+                      {isKm ? 'repos សាធារណៈ' : 'public repos'}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto">
+                  {isAuthConnected && (
+                    <button
+                      type="button"
+                      onClick={() => void fetchStatus()}
+                      className="min-h-[40px] px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-xs font-semibold text-slate-700 dark:text-slate-200 inline-flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0"
+                    >
+                      <RefreshCw className="w-3.5 h-3.5 shrink-0" />
+                      <span>{isKm ? 'ផ្ទុកឡើងវិញ' : 'Refresh'}</span>
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={handleDisconnect}
+                    className="min-h-[40px] px-3.5 py-2 rounded-xl border border-rose-200 dark:border-rose-900 hover:bg-rose-50 dark:hover:bg-rose-950/40 text-xs font-semibold text-rose-600 dark:text-rose-400 inline-flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0"
+                  >
+                    <LogOut className="w-3.5 h-3.5 shrink-0" />
+                    <span>{t.ghDisconnectBtn}</span>
+                  </button>
                 </div>
               </div>
 
-              <div className="flex items-center gap-2 self-start sm:self-auto">
-                <button
-                  type="button"
-                  onClick={() => void fetchStatus()}
-                  className="min-h-[40px] px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-xs font-semibold text-slate-700 dark:text-slate-200 inline-flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0"
-                >
-                  <RefreshCw className="w-3.5 h-3.5 shrink-0" />
-                  <span>{isKm ? 'ផ្ទុកឡើងវិញ' : 'Refresh'}</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={handleDisconnect}
-                  className="min-h-[40px] px-3.5 py-2 rounded-xl border border-rose-200 dark:border-rose-900 hover:bg-rose-50 dark:hover:bg-rose-950/40 text-xs font-semibold text-rose-600 dark:text-rose-400 inline-flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0"
-                >
-                  <LogOut className="w-3.5 h-3.5 shrink-0" />
-                  <span>{t.ghDisconnectBtn}</span>
-                </button>
-              </div>
+              {!isAuthConnected && (
+                <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/70 border border-slate-200 dark:border-slate-700 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-slate-600 dark:text-slate-300">
+                  <span className="leading-relaxed">{t.ghReadOnlyNotice}</span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPublicUser(null);
+                      setConnectMethod('pat');
+                    }}
+                    className="min-h-[36px] px-3.5 py-1.5 rounded-lg bg-[#3B82F6] hover:bg-blue-600 text-white font-semibold inline-flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0 self-start sm:self-auto"
+                  >
+                    <KeyRound className="w-3.5 h-3.5 shrink-0" />
+                    <span>{t.ghUpgradeAuthBtn}</span>
+                  </button>
+                </div>
+              )}
             </div>
           ) : (
             <div className="space-y-5">
               {/* Primary Connect Buttons */}
-              <div className="flex flex-wrap items-center gap-3">
+              <div className="flex flex-wrap items-center gap-2.5">
                 <button
                   type="button"
                   disabled={connectingOAuth}
@@ -657,20 +951,50 @@ export function GitHubConnectPanel() {
                     <Github className="w-4 h-4 shrink-0" />
                   )}
                   <span>{connectingOAuth ? t.ghConnecting : t.ghConnectOAuthBtn}</span>
+                  {status && (
+                    <span className="text-[11px] font-medium opacity-75">
+                      · {status.oauthConfigured ? t.ghOAuthReadyBadge : t.ghOAuthSetupNeededBadge}
+                    </span>
+                  )}
                 </button>
 
                 <button
                   type="button"
-                  onClick={() => setPatOpen((v) => !v)}
-                  className="min-h-[44px] px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 text-sm font-semibold inline-flex items-center gap-2 transition-colors cursor-pointer whitespace-nowrap shrink-0"
+                  onClick={() => {
+                    setConnectMethod('pat');
+                    setErrorMsg(null);
+                    setInfoMsg(null);
+                  }}
+                  className={`min-h-[44px] px-4 py-2.5 rounded-xl border text-sm font-semibold inline-flex items-center gap-2 transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
+                    connectMethod === 'pat'
+                      ? 'border-blue-500 bg-blue-50/70 dark:bg-blue-950/40 text-[#3B82F6] dark:text-blue-400'
+                      : 'border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200'
+                  }`}
                 >
                   <KeyRound className="w-4 h-4 text-[#3B82F6] shrink-0" />
                   <span>{t.ghPatToggleBtn}</span>
                 </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setConnectMethod('public');
+                    setErrorMsg(null);
+                    setInfoMsg(null);
+                  }}
+                  className={`min-h-[44px] px-4 py-2.5 rounded-xl border text-sm font-semibold inline-flex items-center gap-2 transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
+                    connectMethod === 'public'
+                      ? 'border-blue-500 bg-blue-50/70 dark:bg-blue-950/40 text-[#3B82F6] dark:text-blue-400'
+                      : 'border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200'
+                  }`}
+                >
+                  <Globe className="w-4 h-4 text-[#3B82F6] shrink-0" />
+                  <span>{t.ghPublicToggleBtn}</span>
+                </button>
               </div>
 
               {/* PAT Quick Connect Form */}
-              {(patOpen || status?.oauthConfigured === false) && (
+              {connectMethod === 'pat' ? (
                 <form
                   onSubmit={handleConnectPat}
                   className="pt-4 border-t border-slate-100 dark:border-slate-800 space-y-3"
@@ -717,6 +1041,45 @@ export function GitHubConnectPanel() {
                     </a>
                   </p>
                 </form>
+              ) : (
+                /* Public GitHub Username / Repo Quick Connect */
+                <form
+                  onSubmit={handleConnectPublic}
+                  className="pt-4 border-t border-slate-100 dark:border-slate-800 space-y-3"
+                >
+                  <label
+                    htmlFor="gh-public-input"
+                    className="block text-xs font-semibold text-slate-700 dark:text-slate-200"
+                  >
+                    {t.ghPublicLabel}
+                  </label>
+                  <div className="flex flex-col sm:flex-row gap-2.5">
+                    <input
+                      id="gh-public-input"
+                      type="text"
+                      value={publicInput}
+                      onChange={(e) => setPublicInput(e.target.value)}
+                      placeholder={t.ghPublicPlaceholder}
+                      autoComplete="off"
+                      className="flex-1 min-w-0 min-h-[42px] px-3.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-sm text-slate-900 dark:text-slate-100 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                    <button
+                      type="submit"
+                      disabled={!publicInput.trim() || publicSubmitting}
+                      className="min-h-[42px] px-4 py-2 rounded-xl bg-[#3B82F6] hover:bg-blue-600 disabled:opacity-50 text-white text-xs font-semibold inline-flex items-center justify-center gap-2 cursor-pointer whitespace-nowrap shrink-0"
+                    >
+                      {publicSubmitting ? (
+                        <Loader2 className="w-4 h-4 animate-spin shrink-0" />
+                      ) : (
+                        <Globe className="w-4 h-4 shrink-0" />
+                      )}
+                      <span>{t.ghPublicConnectBtn}</span>
+                    </button>
+                  </div>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
+                    {t.ghPublicHint}
+                  </p>
+                </form>
               )}
 
               {/* Callback URI Instructions for GitHub OAuth App */}
@@ -757,7 +1120,7 @@ export function GitHubConnectPanel() {
         </section>
 
         {/* Connected GitHub Tools */}
-        {status?.connected && (
+        {isWorkspaceConnected && (
           <section className="space-y-4">
             {/* Active Wheel Summary + Segmented Tab Switcher */}
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
@@ -777,21 +1140,23 @@ export function GitHubConnectPanel() {
                     {repos.length}
                   </span>
                 </button>
-                <button
-                  type="button"
-                  onClick={() => setActiveTab('gists')}
-                  className={`min-h-[38px] px-3.5 py-1.5 rounded-lg text-xs font-semibold inline-flex items-center gap-2 transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
-                    activeTab === 'gists'
-                      ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm'
-                      : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
-                  }`}
-                >
-                  <FileCode2 className="w-4 h-4 shrink-0" />
-                  <span>{t.ghTabGists}</span>
-                  <span className="font-mono tabular-nums text-slate-400">
-                    {gists.length}
-                  </span>
-                </button>
+                {isAuthConnected && (
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('gists')}
+                    className={`min-h-[38px] px-3.5 py-1.5 rounded-lg text-xs font-semibold inline-flex items-center gap-2 transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
+                      activeTab === 'gists'
+                        ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm'
+                        : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
+                    }`}
+                  >
+                    <FileCode2 className="w-4 h-4 shrink-0" />
+                    <span>{t.ghTabGists}</span>
+                    <span className="font-mono tabular-nums text-slate-400">
+                      {gists.length}
+                    </span>
+                  </button>
+                )}
               </div>
 
               <div className="text-xs text-slate-500 dark:text-slate-400 truncate">
@@ -832,23 +1197,25 @@ export function GitHubConnectPanel() {
                       </span>
                     </div>
 
-                    <button
-                      type="button"
-                      disabled={pushingRepoId === selectedRepo.id}
-                      onClick={() => void handlePushWheelToRepo(selectedRepo)}
-                      className="min-h-[36px] px-3.5 py-1.5 rounded-xl bg-[#3B82F6] hover:bg-blue-600 text-white text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0 disabled:opacity-60"
-                    >
-                      {pushingRepoId === selectedRepo.id ? (
-                        <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" />
-                      ) : (
-                        <UploadCloud className="w-3.5 h-3.5 shrink-0" />
-                      )}
-                      <span>
-                        {pushingRepoId === selectedRepo.id
-                          ? t.ghPushingMsg
-                          : t.ghPushWheelBtn}
-                      </span>
-                    </button>
+                    {isAuthConnected && (
+                      <button
+                        type="button"
+                        disabled={pushingRepoId === selectedRepo.id}
+                        onClick={() => void handlePushWheelToRepo(selectedRepo)}
+                        className="min-h-[36px] px-3.5 py-1.5 rounded-xl bg-[#3B82F6] hover:bg-blue-600 text-white text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0 disabled:opacity-60"
+                      >
+                        {pushingRepoId === selectedRepo.id ? (
+                          <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" />
+                        ) : (
+                          <UploadCloud className="w-3.5 h-3.5 shrink-0" />
+                        )}
+                        <span>
+                          {pushingRepoId === selectedRepo.id
+                            ? t.ghPushingMsg
+                            : t.ghPushWheelBtn}
+                        </span>
+                      </button>
+                    )}
                   </div>
 
                   {repoActionLoading ? (
@@ -977,23 +1344,25 @@ export function GitHubConnectPanel() {
                               <Users className="w-3.5 h-3.5 shrink-0" />
                               <span>{t.ghImportContributorsBtn}</span>
                             </button>
-                            <button
-                              type="button"
-                              disabled={pushingRepoId === repo.id}
-                              onClick={() => void handlePushWheelToRepo(repo)}
-                              className="min-h-[36px] px-3 py-1.5 rounded-lg bg-[#3B82F6] hover:bg-blue-600 text-white text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer whitespace-nowrap disabled:opacity-60"
-                            >
-                              {pushingRepoId === repo.id ? (
-                                <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" />
-                              ) : (
-                                <UploadCloud className="w-3.5 h-3.5 shrink-0" />
-                              )}
-                              <span>
-                                {pushingRepoId === repo.id
-                                  ? t.ghPushingMsg
-                                  : t.ghPushWheelBtn}
-                              </span>
-                            </button>
+                            {isAuthConnected && (
+                              <button
+                                type="button"
+                                disabled={pushingRepoId === repo.id}
+                                onClick={() => void handlePushWheelToRepo(repo)}
+                                className="min-h-[36px] px-3 py-1.5 rounded-lg bg-[#3B82F6] hover:bg-blue-600 text-white text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer whitespace-nowrap disabled:opacity-60"
+                              >
+                                {pushingRepoId === repo.id ? (
+                                  <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" />
+                                ) : (
+                                  <UploadCloud className="w-3.5 h-3.5 shrink-0" />
+                                )}
+                                <span>
+                                  {pushingRepoId === repo.id
+                                    ? t.ghPushingMsg
+                                    : t.ghPushWheelBtn}
+                                </span>
+                              </button>
+                            )}
                           </div>
                         </div>
                       ))}

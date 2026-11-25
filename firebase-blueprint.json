@@ -334,6 +334,11 @@
           "enum": ["approved", "rejected"],
           "description": "Access status controllable by an administrator."
         },
+        "adminNote": {
+          "type": "string",
+          "maxLength": 160,
+          "description": "Optional Admin management note or suspension reason for this registered member."
+        },
         "createdAt": {
           "type": "string",
           "format": "date-time",
@@ -430,7 +435,7 @@
     },
     "PublicAppConfig": {
       "title": "PublicAppConfig",
-      "description": "Public non-PII app display configuration managed by Administrators (e.g. Admin display name shown on the app).",
+      "description": "Public non-PII app display configuration managed by Administrators (Admin display name and instant auto-drop registration code settings).",
       "type": "object",
       "properties": {
         "adminName": {
@@ -438,6 +443,16 @@
           "minLength": 1,
           "maxLength": 80,
           "description": "Administrator display name shown on the application UI."
+        },
+        "autoDropEnabled": {
+          "type": "boolean",
+          "description": "Whether new users instantly receive an auto-dropped Code upon registration without waiting."
+        },
+        "defaultPasscode": {
+          "type": "string",
+          "maxLength": 32,
+          "pattern": "^(|[A-Z0-9_\\-]{4,32})$",
+          "description": "Optional fixed passcode dropped to new registrants (empty means auto-generate a unique PW-XXXX code per user)."
         },
         "updatedAt": {
           "type": "string",
