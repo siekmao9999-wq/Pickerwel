@@ -4,6 +4,10 @@ import { PHASE_DEVELOPMENT_SERVER } from 'next/constants';
 const nextConfig = (phase: string): NextConfig => ({
   // Isolate next dev from production `next build` so dev never overwrites .next/server during builds.
   distDir: phase === PHASE_DEVELOPMENT_SERVER ? '.next-dev' : '.next',
+  onDemandEntries: {
+    maxInactiveAge: 25 * 1000,
+    pagesBufferLength: 3,
+  },
   reactStrictMode: true,
   eslint: {
     ignoreDuringBuilds: true,
@@ -69,10 +73,8 @@ const nextConfig = (phase: string): NextConfig => ({
     devtoolSegmentExplorer: false,
   },
   webpack: (config, { dev }) => {
-    if (dev) {
-      // Prevent dev webpack cache from filling container RAM; HMR is disabled anyway.
-      config.cache = false;
-    }
+    // Disable webpack filesystem pack cache so .next/cache does not consume ~500MB of container tmpfs RAM during Publish.
+    config.cache = false;
     // HMR is disabled in AI Studio via DISABLE_HMR env var.
     // Do not modify—file watching is disabled to prevent flickering during agent edits.
     if (dev && process.env.DISABLE_HMR === 'true') {
