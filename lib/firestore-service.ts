@@ -93,6 +93,7 @@ export interface UserPreferences {
   createdAtMs: number;
   reviewedAtMs: number;
   reviewedBy: string;
+  assignedCode?: string;
 }
 
 export interface SavedWheel {
@@ -173,6 +174,7 @@ function mapUserDoc(uid: string, data: Record<string, unknown>): UserPreferences
     createdAtMs: toMillis(data.createdAt),
     reviewedAtMs: toMillis(data.reviewedAt),
     reviewedBy: String(data.reviewedBy || ''),
+    assignedCode: typeof data.assignedCode === 'string' ? data.assignedCode.slice(0, 32) : '',
   };
 }
 
@@ -316,18 +318,39 @@ export async function reviewUserRegistration(
   targetUid: string,
   status: AccountStatus,
   role: AccountRole,
-  adminUid: string
+  adminUid: string,
+  rawAssignedCode?: string,
+  targetDisplayName?: string
 ): Promise<void> {
   const safeTargetUid = sanitizeId(targetUid);
   const path = `users/${safeTargetUid}`;
   try {
-    await updateDoc(doc(db, 'users', safeTargetUid), {
+    let assignedCode: string | undefined;
+    if (status === 'approved' && rawAssignedCode && rawAssignedCode.trim()) {
+      const normalized = normalizePasscode(rawAssignedCode);
+      if (!VALID_PASSCODE_REGEX.test(normalized)) {
+        throw new Error('INVALID_PASSCODE_FORMAT');
+      }
+      await ensureActiveAdminPasscode(
+        adminUid,
+        normalized,
+        (targetDisplayName || '').trim().slice(0, 80)
+      );
+      assignedCode = normalized;
+    }
+
+    const updatePayload: Record<string, unknown> = {
       status,
       role,
       reviewedAt: serverTimestamp(),
       reviewedBy: sanitizeId(adminUid),
       updatedAt: serverTimestamp(),
-    });
+    };
+    if (assignedCode !== undefined) {
+      updatePayload.assignedCode = assignedCode;
+    }
+
+    await updateDoc(doc(db, 'users', safeTargetUid), updatePayload);
 
     if (role === 'admin' && status === 'approved') {
       await setDoc(doc(db, 'admins', safeTargetUid), {
@@ -338,6 +361,9 @@ export async function reviewUserRegistration(
       await deleteDoc(doc(db, 'admins', safeTargetUid)).catch(() => {});
     }
   } catch (error) {
+    if (error instanceof Error && error.message === 'INVALID_PASSCODE_FORMAT') {
+      throw error;
+    }
     handleFirestoreError(error, OperationType.UPDATE, path);
   }
 }
@@ -872,6 +898,250 @@ export async function deletePasscodeMember(memberId: string): Promise<void> {
   const path = `passcodeMembers/${safeId}`;
   try {
     await deleteDoc(doc(db, 'passcodeMembers', safeId));
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, path);
+  }
+}
+
+/* ============================================================================
+ * USER REGISTRATION REQUESTS -> ADMIN ASSIGNS CODE
+ * ========================================================================== */
+
+export interface RegistrationRequest {
+  id: string;
+  displayName: string;
+  note: string;
+  status: AccountStatus;
+  assignedCode: string;
+  memberId: string;
+  createdAtMs: number;
+  updatedAtMs: number;
+  reviewedAtMs: number;
+  reviewedBy: string;
+}
+
+function generateRegistrationRequestId(): string {
+  const rand =
+    typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID().replace(/-/g, '').slice(0, 16)
+      : `${Math.random().toString(36).slice(2, 10)}${Math.random().toString(36).slice(2, 10)}`;
+  return `req_${Date.now().toString(36)}_${rand}`.slice(0, 64);
+}
+
+function parseRegistrationRequestDoc(
+  docId: string,
+  data: Record<string, unknown>
+): RegistrationRequest {
+  return {
+    id: String(data.id || docId),
+    displayName: String(data.displayName || 'Pickerwel User').slice(0, 80),
+    note: String(data.note || '').slice(0, 120),
+    status:
+      data.status === 'approved' || data.status === 'rejected'
+        ? data.status
+        : 'pending',
+    assignedCode: String(data.assignedCode || '').slice(0, 32),
+    memberId: String(data.memberId || '').slice(0, 128),
+    createdAtMs: toMillis(data.createdAt),
+    updatedAtMs: toMillis(data.updatedAt),
+    reviewedAtMs: toMillis(data.reviewedAt),
+    reviewedBy: String(data.reviewedBy || '').slice(0, 128),
+  };
+}
+
+async function ensureActiveAdminPasscode(
+  adminUid: string,
+  normalizedCode: string,
+  label: string
+): Promise<void> {
+  const safeLabel = label.trim().slice(0, 80);
+  const ref = doc(db, 'passcodes', normalizedCode);
+  const snap = await getDoc(ref);
+  if (!snap.exists()) {
+    await setDoc(ref, {
+      code: normalizedCode,
+      label: safeLabel,
+      active: true,
+      createdBy: sanitizeId(adminUid),
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+    return;
+  }
+  const existingData = snap.data();
+  if (existingData.active !== true) {
+    await updateDoc(ref, {
+      active: true,
+      updatedAt: serverTimestamp(),
+    });
+  }
+}
+
+export async function submitRegistrationRequest(
+  rawName: string,
+  rawNote = ''
+): Promise<RegistrationRequest> {
+  const displayName = rawName.trim().slice(0, 80);
+  if (!displayName) {
+    throw new Error('NAME_REQUIRED');
+  }
+  const note = rawNote.trim().slice(0, 120);
+  const requestId = generateRegistrationRequestId();
+  const path = `registrationRequests/${requestId}`;
+
+  try {
+    await setDoc(doc(db, 'registrationRequests', requestId), {
+      id: requestId,
+      displayName,
+      note,
+      status: 'pending',
+      assignedCode: '',
+      memberId: '',
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+      reviewedAt: serverTimestamp(),
+      reviewedBy: '',
+    });
+    const now = Date.now();
+    return {
+      id: requestId,
+      displayName,
+      note,
+      status: 'pending',
+      assignedCode: '',
+      memberId: '',
+      createdAtMs: now,
+      updatedAtMs: now,
+      reviewedAtMs: now,
+      reviewedBy: '',
+    };
+  } catch (error) {
+    handleFirestoreError(error, OperationType.CREATE, path);
+  }
+}
+
+export function subscribeRegistrationRequest(
+  requestId: string,
+  onUpdate: (request: RegistrationRequest | null) => void
+): Unsubscribe {
+  const safeId = sanitizeId(requestId);
+  if (!/^req_[a-zA-Z0-9_\-]+$/.test(safeId) || safeId.length < 16) {
+    return () => {};
+  }
+  const path = `registrationRequests/${safeId}`;
+  return onSnapshot(
+    doc(db, 'registrationRequests', safeId),
+    (snap) => {
+      if (!snap.exists()) {
+        if (!snap.metadata.fromCache) {
+          onUpdate(null);
+        }
+        return;
+      }
+      onUpdate(parseRegistrationRequestDoc(snap.id, snap.data() as Record<string, unknown>));
+    },
+    (error) => {
+      handleFirestoreError(error, OperationType.GET, path);
+    }
+  );
+}
+
+export function subscribeAllRegistrationRequests(
+  onData: (requests: RegistrationRequest[]) => void
+): Unsubscribe {
+  const path = 'registrationRequests';
+  const q = query(collection(db, 'registrationRequests'), orderBy('createdAt', 'desc'));
+  return onSnapshot(
+    q,
+    (snapshot) => {
+      const list = snapshot.docs.map((d) =>
+        parseRegistrationRequestDoc(d.id, d.data() as Record<string, unknown>)
+      );
+      onData(list);
+    },
+    (error) => {
+      handleFirestoreError(error, OperationType.LIST, path);
+    }
+  );
+}
+
+export async function approveRegistrationRequestWithCode(params: {
+  request: RegistrationRequest;
+  rawCode: string;
+  adminUid: string;
+}): Promise<{ code: string; memberId: string }> {
+  const code = normalizePasscode(params.rawCode);
+  if (!VALID_PASSCODE_REGEX.test(code)) {
+    throw new Error('INVALID_PASSCODE_FORMAT');
+  }
+  const safeAdminUid = sanitizeId(params.adminUid);
+  const safeReqId = sanitizeId(params.request.id);
+  const reqPath = `registrationRequests/${safeReqId}`;
+
+  try {
+    const labelText = [params.request.displayName, params.request.note]
+      .filter(Boolean)
+      .join(' · ')
+      .slice(0, 80);
+
+    // 1. Ensure the assigned passcode exists & is active
+    await ensureActiveAdminPasscode(safeAdminUid, code, labelText);
+
+    // 2. Provision an approved PasscodeMember record linked to this assigned code
+    const memberId = generateMemberId();
+    await setDoc(doc(db, 'passcodeMembers', memberId), {
+      id: memberId,
+      displayName: params.request.displayName.trim().slice(0, 80) || 'Pickerwel User',
+      passcode: code,
+      status: 'approved',
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+
+    // 3. Mark the registration request approved with the assigned code & memberId
+    await updateDoc(doc(db, 'registrationRequests', safeReqId), {
+      status: 'approved',
+      assignedCode: code,
+      memberId,
+      reviewedBy: safeAdminUid,
+      reviewedAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+
+    return { code, memberId };
+  } catch (error) {
+    if (error instanceof Error && error.message === 'INVALID_PASSCODE_FORMAT') {
+      throw error;
+    }
+    handleFirestoreError(error, OperationType.UPDATE, reqPath);
+  }
+}
+
+export async function rejectRegistrationRequest(
+  requestId: string,
+  adminUid: string
+): Promise<void> {
+  const safeReqId = sanitizeId(requestId);
+  const path = `registrationRequests/${safeReqId}`;
+  try {
+    await updateDoc(doc(db, 'registrationRequests', safeReqId), {
+      status: 'rejected',
+      assignedCode: '',
+      memberId: '',
+      reviewedBy: sanitizeId(adminUid),
+      reviewedAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, path);
+  }
+}
+
+export async function deleteRegistrationRequest(requestId: string): Promise<void> {
+  const safeReqId = sanitizeId(requestId);
+  const path = `registrationRequests/${safeReqId}`;
+  try {
+    await deleteDoc(doc(db, 'registrationRequests', safeReqId));
   } catch (error) {
     handleFirestoreError(error, OperationType.DELETE, path);
   }

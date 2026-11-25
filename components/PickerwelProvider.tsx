@@ -48,6 +48,12 @@ import {
   DEFAULT_ADMIN_DISPLAY_NAME,
   subscribePublicAppConfig,
   updatePublicAdminName,
+  submitRegistrationRequest,
+  subscribeRegistrationRequest,
+  subscribeAllRegistrationRequests,
+  approveRegistrationRequestWithCode,
+  rejectRegistrationRequest,
+  deleteRegistrationRequest,
   type AccountRole,
   type AccountStatus,
   type UserPreferences,
@@ -55,6 +61,7 @@ import {
   type SpinResultRecord,
   type AdminPasscode,
   type PasscodeMember,
+  type RegistrationRequest,
 } from '@/lib/firestore-service';
 import { QUICK_START_ENTRIES, WHEEL_TEMPLATES, type WheelTemplate } from '@/lib/templates';
 import type { PaletteId } from '@/lib/palettes';
@@ -133,6 +140,7 @@ const STORAGE_KEYS = {
   activeWheelId: 'pickerwel_active_wheel_id_v1',
   passcodeSession: 'pickerwel_passcode_session_v1',
   appAdminName: 'pickerwel_admin_name_v1',
+  pendingRegistration: 'pickerwel_pending_registration_v1',
 };
 
 export interface PasscodeSession {
@@ -181,10 +189,24 @@ interface PickerwelContextValue {
   currentDisplayName: string;
   isApprovedCloudUser: boolean;
   allUsers: UserPreferences[];
-  reviewUser: (targetUid: string, status: AccountStatus, role: AccountRole) => Promise<void>;
+  reviewUser: (
+    targetUid: string,
+    status: AccountStatus,
+    role: AccountRole,
+    assignedCode?: string,
+    displayName?: string
+  ) => Promise<void>;
 
   adminPasscodes: AdminPasscode[];
   passcodeMembers: PasscodeMember[];
+  registrationRequests: RegistrationRequest[];
+  pendingRegistration: RegistrationRequest | null;
+  submitRegistration: (name: string, note: string) => Promise<RegistrationRequest>;
+  clearPendingRegistration: () => void;
+  activateApprovedRegistration: () => void;
+  approveRegistrationWithCode: (request: RegistrationRequest, code: string) => Promise<string>;
+  rejectRegistration: (requestId: string) => Promise<void>;
+  removeRegistrationRequest: (requestId: string) => Promise<void>;
   createPasscode: (code: string, label: string) => Promise<void>;
   togglePasscode: (code: string, active: boolean) => Promise<void>;
   removePasscode: (code: string) => Promise<void>;
@@ -244,6 +266,8 @@ export function PickerwelProvider({ children }: { children: React.ReactNode }) {
   const [allUsers, setAllUsers] = useState<UserPreferences[]>([]);
   const [adminPasscodes, setAdminPasscodes] = useState<AdminPasscode[]>([]);
   const [passcodeMembers, setPasscodeMembers] = useState<PasscodeMember[]>([]);
+  const [registrationRequests, setRegistrationRequests] = useState<RegistrationRequest[]>([]);
+  const [pendingRegistration, setPendingRegistration] = useState<RegistrationRequest | null>(null);
   const [appAdminName, setAppAdminName] = useState<string>(DEFAULT_ADMIN_DISPLAY_NAME);
   const [authReady, setAuthReady] = useState(false);
   const [authLoading, setAuthLoading] = useState(false);
@@ -388,6 +412,28 @@ export function PickerwelProvider({ children }: { children: React.ReactNode }) {
         if (savedAdminName && savedAdminName.trim()) {
           setAppAdminName(savedAdminName.trim().slice(0, 80));
         }
+
+        const savedPendingReg = localStorage.getItem(STORAGE_KEYS.pendingRegistration);
+        if (savedPendingReg) {
+          const parsedReg = JSON.parse(savedPendingReg) as Partial<RegistrationRequest>;
+          if (parsedReg.id && parsedReg.displayName) {
+            setPendingRegistration({
+              id: parsedReg.id,
+              displayName: parsedReg.displayName,
+              note: parsedReg.note || '',
+              status:
+                parsedReg.status === 'approved' || parsedReg.status === 'rejected'
+                  ? parsedReg.status
+                  : 'pending',
+              assignedCode: parsedReg.assignedCode || '',
+              memberId: parsedReg.memberId || '',
+              createdAtMs: Number(parsedReg.createdAtMs || STARTER_WHEEL_EPOCH_MS),
+              updatedAtMs: Number(parsedReg.updatedAtMs || STARTER_WHEEL_EPOCH_MS),
+              reviewedAtMs: Number(parsedReg.reviewedAtMs || STARTER_WHEEL_EPOCH_MS),
+              reviewedBy: parsedReg.reviewedBy || '',
+            });
+          }
+        }
       } catch {
         // Ignore storage parsing issues
       }
@@ -463,6 +509,22 @@ export function PickerwelProvider({ children }: { children: React.ReactNode }) {
       // Ignore quota errors
     }
   }, [passcodeSession, hydrated]);
+
+  useEffect(() => {
+    if (!hydrated) return;
+    try {
+      if (pendingRegistration) {
+        localStorage.setItem(
+          STORAGE_KEYS.pendingRegistration,
+          JSON.stringify(pendingRegistration)
+        );
+      } else {
+        localStorage.removeItem(STORAGE_KEYS.pendingRegistration);
+      }
+    } catch {
+      // Ignore quota errors
+    }
+  }, [pendingRegistration, hydrated]);
 
   // Listen to Firebase Auth & User Profile approval status
   useEffect(() => {
@@ -593,6 +655,15 @@ export function PickerwelProvider({ children }: { children: React.ReactNode }) {
     return () => unsub();
   }, [user, passcodeSession?.memberId, passcodeSession?.passcode]);
 
+  // Watch the current device's pending registration request in real time for Admin-assigned Code
+  useEffect(() => {
+    if (user || passcodeSession || !pendingRegistration?.id) return;
+    const unsub = subscribeRegistrationRequest(pendingRegistration.id, (updated) => {
+      setPendingRegistration(updated);
+    });
+    return () => unsub();
+  }, [user, passcodeSession, pendingRegistration?.id]);
+
   // Subscribe to all user registration requests, passcodes & passcode members when signed in as Admin
   useEffect(() => {
     if (!isAdmin) {
@@ -600,6 +671,7 @@ export function PickerwelProvider({ children }: { children: React.ReactNode }) {
         setAllUsers([]);
         setAdminPasscodes([]);
         setPasscodeMembers([]);
+        setRegistrationRequests([]);
       });
       return;
     }
@@ -619,10 +691,14 @@ export function PickerwelProvider({ children }: { children: React.ReactNode }) {
     const unsubMembers = subscribeAllPasscodeMembers((members) => {
       setPasscodeMembers(members);
     });
+    const unsubRequests = subscribeAllRegistrationRequests((requests) => {
+      setRegistrationRequests(requests);
+    });
     return () => {
       unsubAll();
       unsubCodes();
       unsubMembers();
+      unsubRequests();
     };
   }, [isAdmin, isPrimaryAdmin]);
 
@@ -653,7 +729,39 @@ export function PickerwelProvider({ children }: { children: React.ReactNode }) {
       status: member.status,
       passcodeActive: true,
     });
+    setPendingRegistration(null);
   }, []);
+
+  const submitRegistration = useCallback(async (name: string, note: string) => {
+    setAuthError(null);
+    const req = await submitRegistrationRequest(name, note);
+    setPendingRegistration(req);
+    return req;
+  }, []);
+
+  const clearPendingRegistration = useCallback(() => {
+    setPendingRegistration(null);
+  }, []);
+
+  const activateApprovedRegistration = useCallback(() => {
+    if (
+      !pendingRegistration ||
+      pendingRegistration.status !== 'approved' ||
+      !pendingRegistration.assignedCode ||
+      !pendingRegistration.memberId
+    ) {
+      return;
+    }
+    setPasscodeSession({
+      memberId: pendingRegistration.memberId,
+      displayName: pendingRegistration.displayName,
+      passcode: pendingRegistration.assignedCode,
+      status: 'approved',
+      passcodeActive: true,
+    });
+    setPendingRegistration(null);
+    setAuthModalOpen(false);
+  }, [pendingRegistration]);
 
   const signInWithGoogle = useCallback(async () => {
     setAuthError(null);
@@ -697,10 +805,52 @@ export function PickerwelProvider({ children }: { children: React.ReactNode }) {
   }, [activeNav, localWheels, setActiveNav]);
 
   const reviewUser = useCallback(
-    async (targetUid: string, status: AccountStatus, _role: AccountRole) => {
+    async (
+      targetUid: string,
+      status: AccountStatus,
+      _role: AccountRole,
+      assignedCode?: string,
+      displayName?: string
+    ) => {
       void _role;
       if (!user || !isPrimaryAdmin) return;
-      await reviewUserRegistration(targetUid, status, 'user', user.uid);
+      await reviewUserRegistration(
+        targetUid,
+        status,
+        'user',
+        user.uid,
+        assignedCode,
+        displayName
+      );
+    },
+    [isPrimaryAdmin, user]
+  );
+
+  const approveRegistrationWithCode = useCallback(
+    async (request: RegistrationRequest, code: string) => {
+      if (!user || !isPrimaryAdmin) return '';
+      const result = await approveRegistrationRequestWithCode({
+        request,
+        rawCode: code,
+        adminUid: user.uid,
+      });
+      return result.code;
+    },
+    [isPrimaryAdmin, user]
+  );
+
+  const rejectRegistration = useCallback(
+    async (requestId: string) => {
+      if (!user || !isPrimaryAdmin) return;
+      await rejectRegistrationRequest(requestId, user.uid);
+    },
+    [isPrimaryAdmin, user]
+  );
+
+  const removeRegistrationRequest = useCallback(
+    async (requestId: string) => {
+      if (!user || !isPrimaryAdmin) return;
+      await deleteRegistrationRequest(requestId);
     },
     [isPrimaryAdmin, user]
   );
@@ -986,6 +1136,14 @@ export function PickerwelProvider({ children }: { children: React.ReactNode }) {
       reviewUser,
       adminPasscodes,
       passcodeMembers,
+      registrationRequests,
+      pendingRegistration,
+      submitRegistration,
+      clearPendingRegistration,
+      activateApprovedRegistration,
+      approveRegistrationWithCode,
+      rejectRegistration,
+      removeRegistrationRequest,
       createPasscode,
       togglePasscode,
       removePasscode,
@@ -1035,6 +1193,14 @@ export function PickerwelProvider({ children }: { children: React.ReactNode }) {
       reviewUser,
       adminPasscodes,
       passcodeMembers,
+      registrationRequests,
+      pendingRegistration,
+      submitRegistration,
+      clearPendingRegistration,
+      activateApprovedRegistration,
+      approveRegistrationWithCode,
+      rejectRegistration,
+      removeRegistrationRequest,
       createPasscode,
       togglePasscode,
       removePasscode,

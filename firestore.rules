@@ -61,7 +61,8 @@ service cloud.firestore {
           'uid', 'displayName', 'email', 'role', 'status',
           'theme', 'language', 'soundEnabled', 'confettiEnabled',
           'hapticsEnabled', 'spinDuration',
-          'createdAt', 'updatedAt', 'reviewedAt', 'reviewedBy'
+          'createdAt', 'updatedAt', 'reviewedAt', 'reviewedBy',
+          'assignedCode'
         ]) &&
         isValidId(data.uid) &&
         data.uid == userId &&
@@ -79,7 +80,8 @@ service cloud.firestore {
         data.createdAt is timestamp &&
         data.updatedAt is timestamp &&
         data.reviewedAt is timestamp &&
-        data.reviewedBy is string && data.reviewedBy.size() <= 128;
+        data.reviewedBy is string && data.reviewedBy.size() <= 128 &&
+        (!('assignedCode' in data) || (data.assignedCode is string && (data.assignedCode == '' || isValidPasscodeId(data.assignedCode))));
     }
 
     function isValidAdminMember(data, adminUid) {
@@ -172,6 +174,13 @@ service cloud.firestore {
         data.updatedAt is timestamp;
     }
 
+    function isValidRequestId(requestId) {
+      return requestId is string &&
+        requestId.size() >= 16 &&
+        requestId.size() <= 128 &&
+        requestId.matches('^req_[a-zA-Z0-9_\\-]+$');
+    }
+
     function isValidPasscodeMember(data, memberId) {
       return data.keys().hasAll(['id', 'displayName', 'passcode', 'status', 'createdAt', 'updatedAt']) &&
         data.keys().hasOnly(['id', 'displayName', 'passcode', 'status', 'createdAt', 'updatedAt']) &&
@@ -182,6 +191,28 @@ service cloud.firestore {
         data.status in ['approved', 'rejected'] &&
         data.createdAt is timestamp &&
         data.updatedAt is timestamp;
+    }
+
+    function isValidRegistrationRequest(data, requestId) {
+      return data.keys().hasAll([
+          'id', 'displayName', 'note', 'status', 'assignedCode',
+          'memberId', 'createdAt', 'updatedAt', 'reviewedAt', 'reviewedBy'
+        ]) &&
+        data.keys().hasOnly([
+          'id', 'displayName', 'note', 'status', 'assignedCode',
+          'memberId', 'createdAt', 'updatedAt', 'reviewedAt', 'reviewedBy'
+        ]) &&
+        isValidRequestId(data.id) &&
+        data.id == requestId &&
+        data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 80 &&
+        data.note is string && data.note.size() <= 120 &&
+        data.status in ['pending', 'approved', 'rejected'] &&
+        data.assignedCode is string && (data.assignedCode == '' || isValidPasscodeId(data.assignedCode)) &&
+        data.memberId is string && (data.memberId == '' || isValidMemberId(data.memberId)) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp &&
+        data.reviewedAt is timestamp &&
+        data.reviewedBy is string && data.reviewedBy.size() <= 128;
     }
 
     function isValidPublicConfig(data) {
@@ -356,7 +387,7 @@ service cloud.firestore {
             incoming().role == 'user' &&
             incoming().reviewedAt == request.time &&
             incoming().diff(existing()).affectedKeys().hasOnly([
-              'status', 'role', 'reviewedAt', 'reviewedBy', 'updatedAt'
+              'status', 'role', 'reviewedAt', 'reviewedBy', 'updatedAt', 'assignedCode'
             ])
           ) ||
           (
@@ -465,6 +496,39 @@ service cloud.firestore {
         incoming().updatedAt == request.time &&
         incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt']);
       allow delete: if isValidMemberId(memberId) && isAdmin();
+    }
+
+    // User Registration Requests Waiting for Admin to Assign a Code
+    match /registrationRequests/{requestId} {
+      allow get: if isValidRequestId(requestId);
+      allow list: if isAdmin();
+      allow create: if isValidRequestId(requestId) &&
+        isValidRegistrationRequest(incoming(), requestId) &&
+        incoming().status == 'pending' &&
+        incoming().assignedCode == '' &&
+        incoming().memberId == '' &&
+        incoming().reviewedBy == '' &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        incoming().reviewedAt == request.time;
+      allow update: if isValidRequestId(requestId) &&
+        isPrimaryAdmin() &&
+        isValidRegistrationRequest(incoming(), requestId) &&
+        incoming().id == existing().id &&
+        incoming().displayName == existing().displayName &&
+        incoming().note == existing().note &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        incoming().reviewedAt == request.time &&
+        incoming().reviewedBy == request.auth.uid &&
+        incoming().diff(existing()).affectedKeys().hasOnly([
+          'status', 'assignedCode', 'memberId', 'reviewedAt', 'reviewedBy', 'updatedAt'
+        ]) &&
+        (
+          incoming().status != 'approved' ||
+          (isValidPasscodeId(incoming().assignedCode) && isValidMemberId(incoming().memberId))
+        );
+      allow delete: if isValidRequestId(requestId) && isPrimaryAdmin();
     }
 
     // Public Non-PII App Config (Admin Display Name)

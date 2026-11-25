@@ -41,6 +41,9 @@
 21. **Submitting to Paused Assignment**: Student creating a submission when `/assignments/{id}.active == false` -> `PERMISSION_DENIED`.
 22. **Submission Owner Mismatch**: Student creating a submission with `ownerId != parent.ownerId` -> `PERMISSION_DENIED`.
 23. **Unapproved User Creating Assignment**: Pending Google user or rejected Passcode member creating `/assignments/asgn_...` -> `PERMISSION_DENIED`.
+24. **Registration Request Self-Approval / Code Injection**: Unauthenticated user creating `/registrationRequests/req_...` with `status: "approved"` or non-empty `assignedCode` -> `PERMISSION_DENIED`.
+25. **Registration Request Enumeration**: Non-admin calling `list` on `/registrationRequests` -> `PERMISSION_DENIED`.
+26. **Non-Admin Code Assignment**: Regular user calling `update` on `/registrationRequests/req_...` or setting `assignedCode` on `/users/{uid}` -> `PERMISSION_DENIED`.
 
 
 

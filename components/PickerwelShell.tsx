@@ -45,6 +45,8 @@ export function PickerwelShell({ children }: { children: React.ReactNode }) {
     isSignedIn,
     currentDisplayName,
     allUsers,
+    registrationRequests,
+    pendingRegistration,
     authLoading,
     openAuthModal,
     signOut,
@@ -87,7 +89,12 @@ export function PickerwelShell({ children }: { children: React.ReactNode }) {
   const isAdmin = Boolean(
     user && userProfile?.role === 'admin' && userProfile?.status === 'approved'
   );
-  const pendingApprovalCount = allUsers.filter((u) => u.status === 'pending').length;
+  const pendingApprovalCount =
+    allUsers.filter((u) => u.status === 'pending').length +
+    registrationRequests.filter((r) => r.status === 'pending').length;
+  const hasAssignedCodeReady = Boolean(
+    !isSignedIn && pendingRegistration?.status === 'approved' && pendingRegistration.assignedCode
+  );
 
   const navItems: {
     id: NavSection;
@@ -306,12 +313,18 @@ export function PickerwelShell({ children }: { children: React.ReactNode }) {
               type="button"
               onClick={openAuthModal}
               disabled={authLoading}
-              title={t.createAccountCta}
-              aria-label={t.createAccountCta}
-              className="w-full min-h-[42px] px-2 lg:px-3 py-2 rounded-xl bg-gradient-to-r from-[#3B82F6] to-[#4F46E5] hover:from-blue-600 hover:to-indigo-700 text-white text-xs font-semibold flex items-center justify-center gap-1.5 shadow-sm transition-all cursor-pointer disabled:opacity-60"
+              title={hasAssignedCodeReady ? t.authCodeReadyBadge : t.createAccountCta}
+              aria-label={hasAssignedCodeReady ? t.authCodeReadyBadge : t.createAccountCta}
+              className={`w-full min-h-[42px] px-2 lg:px-3 py-2 rounded-xl text-white text-xs font-semibold flex items-center justify-center gap-1.5 shadow-sm transition-all cursor-pointer disabled:opacity-60 ${
+                hasAssignedCodeReady
+                  ? 'bg-emerald-600 hover:bg-emerald-700'
+                  : 'bg-gradient-to-r from-[#3B82F6] to-[#4F46E5] hover:from-blue-600 hover:to-indigo-700'
+              }`}
             >
               <UserPlus className="w-4 h-4 lg:w-3.5 lg:h-3.5 shrink-0" />
-              <span className="hidden lg:inline truncate">{t.createAccountCta}</span>
+              <span className="hidden lg:inline truncate">
+                {hasAssignedCodeReady ? t.authCodeReadyBadge : t.createAccountCta}
+              </span>
             </button>
           )}
         </div>

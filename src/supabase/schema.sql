@@ -93,6 +93,8 @@ CREATE TABLE IF NOT EXISTS public.users (
     CHECK (spin_duration >= 3 AND spin_duration <= 10),
   reviewed_by uuid REFERENCES auth.users(id) ON DELETE SET NULL,
   reviewed_at timestamptz NOT NULL DEFAULT now(),
+  assigned_code text NOT NULL DEFAULT ''
+    CHECK (assigned_code = '' OR (char_length(assigned_code) BETWEEN 4 AND 32 AND assigned_code ~ '^[A-Z0-9_-]+$')),
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now()
 );
@@ -173,6 +175,24 @@ CREATE TABLE IF NOT EXISTS public.passcode_members (
     CHECK (char_length(display_name) BETWEEN 1 AND 80),
   passcode text NOT NULL REFERENCES public.passcodes(code) ON DELETE RESTRICT,
   status public.passcode_member_status NOT NULL DEFAULT 'approved',
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+-- 3.7b User Registration Requests (waiting for Admin to assign a Code)
+CREATE TABLE IF NOT EXISTS public.registration_requests (
+  id text PRIMARY KEY
+    CHECK (char_length(id) BETWEEN 16 AND 128 AND id ~ '^req_[a-zA-Z0-9_-]+$'),
+  display_name text NOT NULL
+    CHECK (char_length(display_name) BETWEEN 1 AND 80),
+  note text NOT NULL DEFAULT ''
+    CHECK (char_length(note) <= 120),
+  status public.account_status NOT NULL DEFAULT 'pending',
+  assigned_code text NOT NULL DEFAULT ''
+    CHECK (assigned_code = '' OR (char_length(assigned_code) BETWEEN 4 AND 32 AND assigned_code ~ '^[A-Z0-9_-]+$')),
+  member_id text REFERENCES public.passcode_members(id) ON DELETE SET NULL,
+  reviewed_by uuid REFERENCES auth.users(id) ON DELETE SET NULL,
+  reviewed_at timestamptz NOT NULL DEFAULT now(),
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now()
 );
@@ -310,6 +330,9 @@ CREATE INDEX IF NOT EXISTS idx_passcode_members_passcode
 CREATE INDEX IF NOT EXISTS idx_passcode_members_status_created_at
   ON public.passcode_members (status, created_at DESC);
 
+CREATE INDEX IF NOT EXISTS idx_registration_requests_status_created_at
+  ON public.registration_requests (status, created_at DESC);
+
 CREATE INDEX IF NOT EXISTS idx_assignments_owner_user_created_at
   ON public.assignments (owner_user_id, created_at DESC)
   WHERE owner_user_id IS NOT NULL;
@@ -378,6 +401,11 @@ CREATE TRIGGER trg_passcodes_updated_at
 DROP TRIGGER IF EXISTS trg_passcode_members_updated_at ON public.passcode_members;
 CREATE TRIGGER trg_passcode_members_updated_at
   BEFORE UPDATE ON public.passcode_members
+  FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+
+DROP TRIGGER IF EXISTS trg_registration_requests_updated_at ON public.registration_requests;
+CREATE TRIGGER trg_registration_requests_updated_at
+  BEFORE UPDATE ON public.registration_requests
   FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
 
 DROP TRIGGER IF EXISTS trg_assignments_updated_at ON public.assignments;
@@ -784,6 +812,7 @@ ALTER TABLE public.wheels ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.spin_results ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.passcodes ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.passcode_members ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.registration_requests ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.assignments ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.student_submissions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.forms ENABLE ROW LEVEL SECURITY;
@@ -920,6 +949,32 @@ CREATE POLICY "passcode_members_delete_admin"
   ON public.passcode_members FOR DELETE
   TO authenticated
   USING (public.is_admin());
+
+-- 7.7b public.registration_requests (anyone can submit pending request; Admins review & assign codes)
+DROP POLICY IF EXISTS "registration_requests_insert_public" ON public.registration_requests;
+CREATE POLICY "registration_requests_insert_public"
+  ON public.registration_requests FOR INSERT
+  TO anon, authenticated
+  WITH CHECK (status = 'pending' AND assigned_code = '' AND member_id IS NULL);
+
+DROP POLICY IF EXISTS "registration_requests_select_admin" ON public.registration_requests;
+CREATE POLICY "registration_requests_select_admin"
+  ON public.registration_requests FOR SELECT
+  TO authenticated
+  USING (public.is_admin());
+
+DROP POLICY IF EXISTS "registration_requests_update_primary_admin" ON public.registration_requests;
+CREATE POLICY "registration_requests_update_primary_admin"
+  ON public.registration_requests FOR UPDATE
+  TO authenticated
+  USING (public.is_primary_admin())
+  WITH CHECK (public.is_primary_admin());
+
+DROP POLICY IF EXISTS "registration_requests_delete_primary_admin" ON public.registration_requests;
+CREATE POLICY "registration_requests_delete_primary_admin"
+  ON public.registration_requests FOR DELETE
+  TO authenticated
+  USING (public.is_primary_admin());
 
 -- 7.8 public.assignments (owner + admin manage; students read single task via RPC)
 DROP POLICY IF EXISTS "assignments_select_owner_or_admin" ON public.assignments;

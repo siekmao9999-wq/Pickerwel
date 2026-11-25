@@ -24,6 +24,7 @@ import {
   PauseCircle,
   PlayCircle,
   Link2,
+  UserPlus,
 } from 'lucide-react';
 import { usePickerwel } from './PickerwelProvider';
 import { QrShareModal } from './QrShareModal';
@@ -38,6 +39,7 @@ import {
   subscribeAllAssignments,
   updateStudentAssignment,
   type AccountStatus,
+  type RegistrationRequest,
   type StudentAssignment,
   type UserPreferences,
 } from '@/lib/firestore-service';
@@ -46,7 +48,13 @@ import { getShareOrigin } from '@/lib/share-origin';
 const subscribeNoop = () => () => {};
 const getOriginServer = () => '';
 
-type AdminTab = 'passcodes' | 'passcodeMembers' | 'googleUsers' | 'studentTasks';
+type AdminTab = 'requests' | 'passcodes' | 'passcodeMembers' | 'googleUsers' | 'studentTasks';
+
+function buildSuggestedCode(seed: string): string {
+  const cleaned = seed.replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+  const suffix = (cleaned.slice(-4) || '2026').padEnd(4, '7');
+  return `PW${suffix}`;
+}
 
 export function AdminView() {
   const {
@@ -56,6 +64,10 @@ export function AdminView() {
     reviewUser,
     adminPasscodes,
     passcodeMembers,
+    registrationRequests,
+    approveRegistrationWithCode,
+    rejectRegistration,
+    removeRegistrationRequest,
     createPasscode,
     togglePasscode,
     removePasscode,
@@ -67,10 +79,16 @@ export function AdminView() {
   } = usePickerwel();
 
   const t = COPY[settings.language];
-  const [activeTab, setActiveTab] = useState<AdminTab>('passcodes');
+  const [activeTab, setActiveTab] = useState<AdminTab>('requests');
   const [filter, setFilter] = useState<'all' | AccountStatus>('pending');
+  const [requestFilter, setRequestFilter] = useState<'all' | AccountStatus>('pending');
   const [searchQuery, setSearchQuery] = useState('');
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [requestCodeDrafts, setRequestCodeDrafts] = useState<Record<string, string>>({});
+  const [editingRequestCodeId, setEditingRequestCodeId] = useState<string | null>(null);
+  const [requestErrorById, setRequestErrorById] = useState<Record<string, string>>({});
+  const [googleCodeDrafts, setGoogleCodeDrafts] = useState<Record<string, string>>({});
+  const [googleErrorById, setGoogleErrorById] = useState<Record<string, string>>({});
 
   // Passcode creator state
   const [newCode, setNewCode] = useState('PW-2026');
@@ -126,6 +144,18 @@ export function AdminView() {
   }
 
   const pendingGoogleCount = allUsers.filter((u) => u.status === 'pending').length;
+  const pendingRequestsCount = registrationRequests.filter((r) => r.status === 'pending').length;
+
+  const filteredRequests = registrationRequests.filter((r) => {
+    if (requestFilter !== 'all' && r.status !== requestFilter) return false;
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return true;
+    return (
+      r.displayName.toLowerCase().includes(q) ||
+      r.note.toLowerCase().includes(q) ||
+      r.assignedCode.toLowerCase().includes(q)
+    );
+  });
 
   const filteredGoogleUsers = allUsers.filter((u) => {
     if (filter !== 'all' && u.status !== filter) return false;
@@ -133,7 +163,8 @@ export function AdminView() {
     if (!q) return true;
     return (
       u.displayName.toLowerCase().includes(q) ||
-      u.email.toLowerCase().includes(q)
+      u.email.toLowerCase().includes(q) ||
+      (u.assignedCode || '').toLowerCase().includes(q)
     );
   });
 
@@ -151,9 +182,62 @@ export function AdminView() {
     nextStatus: AccountStatus,
     nextRole: 'user' | 'admin'
   ) => {
+    setGoogleErrorById((prev) => ({ ...prev, [target.uid]: '' }));
+    const draftCode = (googleCodeDrafts[target.uid] || '').trim().toUpperCase();
+    if (nextStatus === 'approved' && draftCode && !isValidPasscodeFormat(draftCode)) {
+      setGoogleErrorById((prev) => ({ ...prev, [target.uid]: t.authPasscodeFormatError }));
+      return;
+    }
     setBusyId(target.uid);
     try {
-      await reviewUser(target.uid, nextStatus, nextRole);
+      await reviewUser(
+        target.uid,
+        nextStatus,
+        nextRole,
+        nextStatus === 'approved' && draftCode ? draftCode : undefined,
+        target.displayName
+      );
+      if (draftCode) {
+        setGoogleCodeDrafts((prev) => {
+          const next = { ...prev };
+          delete next[target.uid];
+          return next;
+        });
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : '';
+      if (msg === 'INVALID_PASSCODE_FORMAT') {
+        setGoogleErrorById((prev) => ({ ...prev, [target.uid]: t.authPasscodeFormatError }));
+      }
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const handleAssignCodeToRequest = async (req: RegistrationRequest) => {
+    const rawCode = (
+      requestCodeDrafts[req.id] ?? (req.assignedCode || buildSuggestedCode(req.id))
+    )
+      .trim()
+      .toUpperCase();
+    setRequestErrorById((prev) => ({ ...prev, [req.id]: '' }));
+    if (!isValidPasscodeFormat(rawCode)) {
+      setRequestErrorById((prev) => ({ ...prev, [req.id]: t.authPasscodeFormatError }));
+      return;
+    }
+    setBusyId(req.id);
+    try {
+      await approveRegistrationWithCode(req, rawCode);
+      setEditingRequestCodeId((curr) => (curr === req.id ? null : curr));
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : '';
+      setRequestErrorById((prev) => ({
+        ...prev,
+        [req.id]:
+          msg === 'INVALID_PASSCODE_FORMAT'
+            ? t.authPasscodeFormatError
+            : t.authPasscodeNetworkError,
+      }));
     } finally {
       setBusyId(null);
     }
@@ -248,10 +332,18 @@ export function AdminView() {
   };
 
   const mainTabs: { id: AdminTab; label: string; icon: React.ComponentType<{ className?: string }>; count?: number }[] = [
+    { id: 'requests', label: t.adminTabRequests, icon: UserPlus, count: pendingRequestsCount },
     { id: 'passcodes', label: t.adminTabPasscodes, icon: KeyRound, count: adminPasscodes.length },
     { id: 'passcodeMembers', label: t.adminTabPasscodeMembers, icon: Users, count: passcodeMembers.length },
     { id: 'googleUsers', label: t.adminTabGoogleUsers, icon: ShieldCheck, count: pendingGoogleCount },
     { id: 'studentTasks', label: t.adminTabStudentTasks, icon: QrCode, count: allAssignments.length },
+  ];
+
+  const requestFilterTabs: { id: 'all' | AccountStatus; label: string }[] = [
+    { id: 'pending', label: `${t.filterPending} (${pendingRequestsCount})` },
+    { id: 'approved', label: t.filterApproved },
+    { id: 'rejected', label: t.filterRejected },
+    { id: 'all', label: t.filterAll },
   ];
 
   const filterTabs: { id: 'all' | AccountStatus; label: string }[] = [
@@ -367,6 +459,271 @@ export function AdminView() {
             );
           })}
         </div>
+
+        {/* Shared datalist of existing active passcodes for quick assignment */}
+        <datalist id="admin-active-passcodes">
+          {adminPasscodes
+            .filter((p) => p.active)
+            .map((p) => (
+              <option key={p.code} value={p.code}>
+                {p.label ? `${p.code} — ${p.label}` : p.code}
+              </option>
+            ))}
+        </datalist>
+
+        {/* ============================================================ */}
+        {/* TAB 0: USER REGISTRATION REQUESTS -> ADMIN ASSIGNS CODE      */}
+        {/* ============================================================ */}
+        {activeTab === 'requests' && (
+          <div className="space-y-4">
+            <div className="p-4 rounded-xl bg-blue-50/70 dark:bg-blue-950/30 border border-blue-200/70 dark:border-blue-900/60 flex items-start gap-2.5 text-xs text-slate-700 dark:text-slate-200">
+              <KeyRound className="w-4 h-4 text-[#3B82F6] shrink-0 mt-0.5" />
+              <span>{t.adminRequestsNotice}</span>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-1 p-1 bg-slate-100 dark:bg-slate-800 rounded-xl w-fit">
+              {requestFilterTabs.map((tab) => (
+                <button
+                  key={tab.id}
+                  type="button"
+                  onClick={() => setRequestFilter(tab.id)}
+                  className={`min-h-[38px] px-3.5 py-1.5 text-xs font-semibold rounded-lg transition-colors cursor-pointer whitespace-nowrap tabular-nums ${
+                    requestFilter === tab.id
+                      ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm'
+                      : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
+                  }`}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+
+            {filteredRequests.length === 0 ? (
+              <div className="p-10 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-center text-sm text-slate-500 dark:text-slate-400">
+                {t.adminRequestsEmpty}
+              </div>
+            ) : (
+              <div className="rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 divide-y divide-slate-100 dark:divide-slate-800">
+                {filteredRequests.map((req) => {
+                  const isBusy = busyId === req.id;
+                  const isEditingCode =
+                    req.status !== 'approved' || editingRequestCodeId === req.id;
+                  const codeValue =
+                    requestCodeDrafts[req.id] ??
+                    (req.assignedCode || buildSuggestedCode(req.id));
+                  const reqError = requestErrorById[req.id];
+                  const isCopied = copiedCode === req.assignedCode && Boolean(req.assignedCode);
+
+                  return (
+                    <div key={req.id} className="p-4 sm:p-5 space-y-3">
+                      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+                        <div className="min-w-0 space-y-1">
+                          <div className="flex items-center gap-2.5 flex-wrap">
+                            <span className="font-display text-base font-semibold text-slate-900 dark:text-white truncate">
+                              {req.displayName}
+                            </span>
+                            <span
+                              className={`inline-flex items-center gap-1 text-xs font-semibold ${
+                                req.status === 'approved'
+                                  ? 'text-emerald-600 dark:text-emerald-400'
+                                  : req.status === 'rejected'
+                                  ? 'text-rose-600 dark:text-rose-400'
+                                  : 'text-amber-600 dark:text-amber-400'
+                              }`}
+                            >
+                              {req.status === 'approved' ? (
+                                <CheckCircle2 className="w-3.5 h-3.5" />
+                              ) : req.status === 'rejected' ? (
+                                <XCircle className="w-3.5 h-3.5" />
+                              ) : (
+                                <Clock className="w-3.5 h-3.5" />
+                              )}
+                              <span>
+                                {req.status === 'approved'
+                                  ? t.statusApproved
+                                  : req.status === 'rejected'
+                                  ? t.statusRejected
+                                  : t.statusPending}
+                              </span>
+                            </span>
+                          </div>
+
+                          <p className="text-xs text-slate-500 dark:text-slate-400 flex items-center gap-1.5 flex-wrap">
+                            {req.note && (
+                              <>
+                                <span className="text-slate-700 dark:text-slate-300 font-medium">
+                                  {req.note}
+                                </span>
+                                <span aria-hidden="true">·</span>
+                              </>
+                            )}
+                            <span className="tabular-nums" suppressHydrationWarning>
+                              {new Date(req.createdAtMs).toLocaleDateString()}
+                            </span>
+                            {req.assignedCode && (
+                              <>
+                                <span aria-hidden="true">·</span>
+                                <span>
+                                  {t.adminAssignedCodeLabel}:{' '}
+                                  <strong className="font-mono text-slate-900 dark:text-white tracking-wider">
+                                    {req.assignedCode}
+                                  </strong>
+                                </span>
+                              </>
+                            )}
+                          </p>
+                        </div>
+
+                        {isEditingCode ? (
+                          <div className="flex flex-wrap items-center gap-2 shrink-0">
+                            <div className="flex items-center gap-1.5">
+                              <input
+                                type="text"
+                                list="admin-active-passcodes"
+                                value={codeValue}
+                                onChange={(e) =>
+                                  setRequestCodeDrafts((prev) => ({
+                                    ...prev,
+                                    [req.id]: e.target.value.toUpperCase(),
+                                  }))
+                                }
+                                maxLength={32}
+                                placeholder={t.adminAssignCodePlaceholder}
+                                aria-label={t.passcodeInputLabel}
+                                className="w-36 sm:w-40 h-10 px-3 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 font-mono text-xs font-bold tracking-wider uppercase text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                              />
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setRequestCodeDrafts((prev) => ({
+                                    ...prev,
+                                    [req.id]: generateRandomPasscode('PW'),
+                                  }))
+                                }
+                                title={t.passcodeGenerateRandomBtn}
+                                aria-label={t.passcodeGenerateRandomBtn}
+                                className="h-10 w-10 rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 inline-flex items-center justify-center cursor-pointer shrink-0"
+                              >
+                                <RefreshCw className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+
+                            <button
+                              type="button"
+                              disabled={isBusy}
+                              onClick={() => handleAssignCodeToRequest(req)}
+                              className="min-h-[40px] px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold inline-flex items-center gap-1.5 transition-colors disabled:opacity-50 cursor-pointer whitespace-nowrap"
+                            >
+                              <KeyRound className="w-3.5 h-3.5" />
+                              <span>{t.adminAssignCodeApproveBtn}</span>
+                            </button>
+
+                            {req.status === 'pending' && (
+                              <button
+                                type="button"
+                                disabled={isBusy}
+                                onClick={async () => {
+                                  setBusyId(req.id);
+                                  try {
+                                    await rejectRegistration(req.id);
+                                  } finally {
+                                    setBusyId(null);
+                                  }
+                                }}
+                                className="min-h-[40px] px-3 py-2 rounded-xl border border-rose-200 dark:border-rose-900 bg-rose-50 dark:bg-rose-950/30 hover:bg-rose-100 text-rose-700 dark:text-rose-300 text-xs font-semibold inline-flex items-center gap-1.5 transition-colors disabled:opacity-50 cursor-pointer whitespace-nowrap"
+                              >
+                                <UserX className="w-3.5 h-3.5" />
+                                <span>{t.rejectBtn}</span>
+                              </button>
+                            )}
+
+                            {req.status === 'approved' && (
+                              <button
+                                type="button"
+                                onClick={() => setEditingRequestCodeId(null)}
+                                className="min-h-[40px] px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
+                              >
+                                {t.close}
+                              </button>
+                            )}
+                          </div>
+                        ) : (
+                          <div className="flex flex-wrap items-center gap-2 shrink-0">
+                            <button
+                              type="button"
+                              onClick={() => handleCopyCode(req.assignedCode)}
+                              className="min-h-[38px] px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-xs font-semibold text-slate-700 dark:text-slate-200 inline-flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
+                            >
+                              {isCopied ? (
+                                <Check className="w-3.5 h-3.5 text-emerald-500" />
+                              ) : (
+                                <Copy className="w-3.5 h-3.5" />
+                              )}
+                              <span>{isCopied ? t.passcodeCopiedBtn : t.passcodeCopyBtn}</span>
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => handleCopyInviteLink(req.assignedCode)}
+                              className="min-h-[38px] px-3 py-1.5 rounded-xl bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-800 hover:bg-blue-100 dark:hover:bg-blue-950/70 text-xs font-semibold text-[#3B82F6] dark:text-blue-400 inline-flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
+                            >
+                              {copiedInviteCode === req.assignedCode ? (
+                                <Check className="w-3.5 h-3.5 text-emerald-500" />
+                              ) : (
+                                <Link2 className="w-3.5 h-3.5" />
+                              )}
+                              <span>
+                                {copiedInviteCode === req.assignedCode
+                                  ? t.passcodeCopiedLinkBtn
+                                  : t.passcodeCopyLinkBtn}
+                              </span>
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setRequestCodeDrafts((prev) => ({
+                                  ...prev,
+                                  [req.id]: req.assignedCode || generateRandomPasscode('PW'),
+                                }));
+                                setEditingRequestCodeId(req.id);
+                              }}
+                              className="min-h-[38px] px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-xs font-medium text-slate-700 dark:text-slate-200 inline-flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
+                            >
+                              <KeyRound className="w-3.5 h-3.5" />
+                              <span>{t.adminChangeCodeBtn}</span>
+                            </button>
+
+                            <button
+                              type="button"
+                              disabled={isBusy}
+                              onClick={async () => {
+                                setBusyId(req.id);
+                                try {
+                                  await removeRegistrationRequest(req.id);
+                                } finally {
+                                  setBusyId(null);
+                                }
+                              }}
+                              aria-label={t.passcodeDeleteBtn}
+                              className="min-h-[38px] min-w-[38px] px-2.5 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500 hover:text-rose-600 inline-flex items-center justify-center cursor-pointer disabled:opacity-50"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        )}
+                      </div>
+
+                      {reqError && (
+                        <p className="text-xs text-rose-600 dark:text-rose-400">{reqError}</p>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* ============================================================ */}
         {/* TAB 1: PASSCODES GENERATOR & MANAGER                         */}
@@ -777,20 +1134,92 @@ export function AdminView() {
                           <span className="tabular-nums" suppressHydrationWarning>
                             {new Date(item.createdAtMs).toLocaleDateString()}
                           </span>
+                          {item.assignedCode && (
+                            <>
+                              <span aria-hidden="true"> · </span>
+                              <span>
+                                {t.adminAssignedCodeLabel}:{' '}
+                                <strong className="font-mono text-slate-800 dark:text-slate-100">
+                                  {item.assignedCode}
+                                </strong>
+                              </span>
+                            </>
+                          )}
                         </p>
+                        {googleErrorById[item.uid] && (
+                          <p className="text-xs text-rose-600 dark:text-rose-400">
+                            {googleErrorById[item.uid]}
+                          </p>
+                        )}
                       </div>
 
                       {!isPrimaryAdmin && !isSelf && (
                         <div className="flex flex-wrap items-center gap-2 shrink-0">
                           {item.status !== 'approved' && (
+                            <>
+                              <div className="flex items-center gap-1.5">
+                                <input
+                                  type="text"
+                                  list="admin-active-passcodes"
+                                  value={googleCodeDrafts[item.uid] ?? ''}
+                                  onChange={(e) =>
+                                    setGoogleCodeDrafts((prev) => ({
+                                      ...prev,
+                                      [item.uid]: e.target.value.toUpperCase(),
+                                    }))
+                                  }
+                                  maxLength={32}
+                                  placeholder={t.adminOptionalCodePlaceholder}
+                                  aria-label={t.passcodeInputLabel}
+                                  className="w-36 h-10 px-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 font-mono text-xs tracking-wider uppercase text-slate-900 dark:text-white placeholder:font-sans placeholder:tracking-normal placeholder:normal-case focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setGoogleCodeDrafts((prev) => ({
+                                      ...prev,
+                                      [item.uid]: generateRandomPasscode('PW'),
+                                    }))
+                                  }
+                                  title={t.passcodeGenerateRandomBtn}
+                                  aria-label={t.passcodeGenerateRandomBtn}
+                                  className="h-10 w-10 rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 inline-flex items-center justify-center cursor-pointer shrink-0"
+                                >
+                                  <RefreshCw className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                              <button
+                                type="button"
+                                disabled={isBusy}
+                                onClick={() => handleAction(item, 'approved', 'user')}
+                                className="min-h-[40px] px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold inline-flex items-center gap-1.5 transition-colors disabled:opacity-50 cursor-pointer whitespace-nowrap"
+                              >
+                                <UserCheck className="w-3.5 h-3.5" />
+                                <span>
+                                  {(googleCodeDrafts[item.uid] || '').trim()
+                                    ? t.adminApproveWithCodeBtn
+                                    : t.approveBtn}
+                                </span>
+                              </button>
+                            </>
+                          )}
+
+                          {item.status === 'approved' && item.assignedCode && (
                             <button
                               type="button"
-                              disabled={isBusy}
-                              onClick={() => handleAction(item, 'approved', 'user')}
-                              className="min-h-[40px] px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold inline-flex items-center gap-1.5 transition-colors disabled:opacity-50 cursor-pointer whitespace-nowrap"
+                              onClick={() => handleCopyCode(item.assignedCode!)}
+                              className="min-h-[40px] px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-xs font-semibold text-slate-700 dark:text-slate-200 inline-flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
                             >
-                              <UserCheck className="w-3.5 h-3.5" />
-                              <span>{t.approveBtn}</span>
+                              {copiedCode === item.assignedCode ? (
+                                <Check className="w-3.5 h-3.5 text-emerald-500" />
+                              ) : (
+                                <Copy className="w-3.5 h-3.5" />
+                              )}
+                              <span>
+                                {copiedCode === item.assignedCode
+                                  ? t.passcodeCopiedBtn
+                                  : t.passcodeCopyBtn}
+                              </span>
                             </button>
                           )}
 

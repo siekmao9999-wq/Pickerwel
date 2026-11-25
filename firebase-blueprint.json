@@ -78,6 +78,12 @@
           "type": "string",
           "maxLength": 128,
           "description": "UID of the admin who approved or rejected the registration."
+        },
+        "assignedCode": {
+          "type": "string",
+          "maxLength": 32,
+          "pattern": "^(|[A-Z0-9_\\-]{4,32})$",
+          "description": "Optional registration passcode assigned to this user by the Admin."
         }
       },
       "required": [
@@ -346,6 +352,80 @@
         "status",
         "createdAt",
         "updatedAt"
+      ]
+    },
+    "RegistrationRequest": {
+      "title": "RegistrationRequest",
+      "description": "A new user registration request waiting for the Admin to assign a registration Code.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 16,
+          "maxLength": 128,
+          "pattern": "^req_[a-zA-Z0-9_\\-]+$",
+          "description": "Unguessable registration request identifier."
+        },
+        "displayName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80,
+          "description": "Display name submitted by the registering user."
+        },
+        "note": {
+          "type": "string",
+          "maxLength": 120,
+          "description": "Optional classroom, group, or contact note for the Admin."
+        },
+        "status": {
+          "type": "string",
+          "enum": ["pending", "approved", "rejected"],
+          "description": "Admin review status for the registration request."
+        },
+        "assignedCode": {
+          "type": "string",
+          "maxLength": 32,
+          "pattern": "^(|[A-Z0-9_\\-]{4,32})$",
+          "description": "Registration Code assigned by the Admin upon approval."
+        },
+        "memberId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^(|pm_[a-zA-Z0-9_\\-]+)$",
+          "description": "PasscodeMember identifier provisioned by the Admin upon approval."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server creation timestamp."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server last update timestamp."
+        },
+        "reviewedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when created or reviewed by an admin."
+        },
+        "reviewedBy": {
+          "type": "string",
+          "maxLength": 128,
+          "description": "UID of the admin who assigned the code or rejected the request."
+        }
+      },
+      "required": [
+        "id",
+        "displayName",
+        "note",
+        "status",
+        "assignedCode",
+        "memberId",
+        "createdAt",
+        "updatedAt",
+        "reviewedAt",
+        "reviewedBy"
       ]
     },
     "PublicAppConfig": {
@@ -721,6 +801,10 @@
     "/passcodeMembers/{memberId}": {
       "schema": { "$ref": "#/entities/PasscodeMember" },
       "description": "Stores email-less user registrations verified against active Admin passcodes."
+    },
+    "/registrationRequests/{requestId}": {
+      "schema": { "$ref": "#/entities/RegistrationRequest" },
+      "description": "Stores pending user registration requests awaiting Admin code assignment."
     },
     "/appConfig/{docId}": {
       "schema": { "$ref": "#/entities/PublicAppConfig" },
