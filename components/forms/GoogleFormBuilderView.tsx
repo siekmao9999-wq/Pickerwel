@@ -171,6 +171,7 @@ export function GoogleFormBuilderView() {
   const [shareMode, setShareMode] = useState<'offline' | 'online'>('offline');
   const [wheelImportToast, setWheelImportToast] = useState<string | null>(null);
   const [formulaTarget, setFormulaTarget] = useState<FormulaTarget | null>(null);
+  const [editingMathFieldKey, setEditingMathFieldKey] = useState<string | null>(null);
   const [syncQueueOpen, setSyncQueueOpen] = useState(false);
 
   // Undo / Redo history for active form
@@ -1142,41 +1143,121 @@ export function GoogleFormBuilderView() {
                   style={{ backgroundColor: theme.primary }}
                 />
                 <div className="p-5 sm:p-6 space-y-2.5">
-                  <textarea
-                    rows={1}
-                    value={activeForm.title}
-                    maxLength={220}
-                    onChange={(e) =>
-                      mutateActiveForm(
-                        (prev) => ({ ...prev, title: e.target.value.replace(/\n/g, ' ') }),
-                        false
-                      )
-                    }
-                    placeholder={km ? 'ចំណងជើងទម្រង់...' : 'Form title'}
-                    className="w-full bg-transparent font-display text-xl sm:text-[28px] font-normal text-slate-900 dark:text-white border-b border-transparent focus:border-[#673AB7] focus:outline-none pb-1 resize-none leading-snug"
-                  />
-                  {hasExplicitMathSyntax(activeForm.title) && (
-                    <div className="rounded-lg bg-purple-50/70 dark:bg-purple-950/30 border border-purple-200/70 dark:border-purple-800/60 px-3 py-1.5 text-base font-semibold text-slate-900 dark:text-white overflow-x-auto">
+                  {hasExplicitMathSyntax(activeForm.title) &&
+                  editingMathFieldKey !== 'form_title' ? (
+                    <div
+                      role="button"
+                      tabIndex={0}
+                      onClick={(e) => {
+                        if (focusedCardId === 'header') {
+                          e.stopPropagation();
+                          setEditingMathFieldKey('form_title');
+                        }
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          setFocusedCardId('header');
+                          setEditingMathFieldKey('form_title');
+                        }
+                      }}
+                      title={km ? 'ចុចដើម្បីកែប្រែ' : 'Click to edit'}
+                      className="w-full font-display text-xl sm:text-[28px] font-normal text-slate-900 dark:text-white border-b border-transparent hover:border-slate-200 dark:hover:border-slate-700 pb-1 leading-snug cursor-text overflow-x-auto"
+                    >
                       <MathText text={activeForm.title} explicitOnly />
                     </div>
+                  ) : (
+                    <>
+                      <textarea
+                        rows={1}
+                        autoFocus={editingMathFieldKey === 'form_title'}
+                        value={activeForm.title}
+                        maxLength={220}
+                        onBlur={() =>
+                          setEditingMathFieldKey((cur) =>
+                            cur === 'form_title' ? null : cur
+                          )
+                        }
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            setEditingMathFieldKey(null);
+                          }
+                        }}
+                        onChange={(e) =>
+                          mutateActiveForm(
+                            (prev) => ({ ...prev, title: e.target.value.replace(/\n/g, ' ') }),
+                            false
+                          )
+                        }
+                        placeholder={km ? 'ចំណងជើងទម្រង់...' : 'Form title'}
+                        className="w-full bg-transparent font-display text-xl sm:text-[28px] font-normal text-slate-900 dark:text-white border-b border-transparent focus:border-[#673AB7] focus:outline-none pb-1 resize-none leading-snug"
+                      />
+                      {editingMathFieldKey === 'form_title' &&
+                        hasExplicitMathSyntax(activeForm.title) && (
+                          <div className="rounded-lg bg-purple-50/70 dark:bg-purple-950/30 border border-purple-200/70 dark:border-purple-800/60 px-3 py-1.5 text-base font-semibold text-slate-900 dark:text-white overflow-x-auto">
+                            <MathText text={activeForm.title} explicitOnly />
+                          </div>
+                        )}
+                    </>
                   )}
-                  <input
-                    type="text"
-                    value={activeForm.description}
-                    maxLength={2000}
-                    onChange={(e) =>
-                      mutateActiveForm(
-                        (prev) => ({ ...prev, description: e.target.value }),
-                        false
-                      )
-                    }
-                    placeholder={km ? 'ការពិពណ៌នាទម្រង់' : 'Form description'}
-                    className="w-full bg-transparent text-sm text-slate-600 dark:text-slate-300 border-b border-transparent focus:border-[#673AB7] focus:outline-none pb-1"
-                  />
-                  {hasExplicitMathSyntax(activeForm.description) && (
-                    <div className="rounded-lg bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 px-3 py-1.5 text-sm text-slate-700 dark:text-slate-200 overflow-x-auto">
+                  {hasExplicitMathSyntax(activeForm.description) &&
+                  editingMathFieldKey !== 'form_desc' ? (
+                    <div
+                      role="button"
+                      tabIndex={0}
+                      onClick={(e) => {
+                        if (focusedCardId === 'header') {
+                          e.stopPropagation();
+                          setEditingMathFieldKey('form_desc');
+                        }
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          setFocusedCardId('header');
+                          setEditingMathFieldKey('form_desc');
+                        }
+                      }}
+                      title={km ? 'ចុចដើម្បីកែប្រែ' : 'Click to edit'}
+                      className="w-full text-sm text-slate-600 dark:text-slate-300 border-b border-transparent hover:border-slate-200 dark:hover:border-slate-700 pb-1 cursor-text overflow-x-auto"
+                    >
                       <MathText text={activeForm.description} explicitOnly />
                     </div>
+                  ) : (
+                    <>
+                      <input
+                        type="text"
+                        autoFocus={editingMathFieldKey === 'form_desc'}
+                        value={activeForm.description}
+                        maxLength={2000}
+                        onBlur={() =>
+                          setEditingMathFieldKey((cur) =>
+                            cur === 'form_desc' ? null : cur
+                          )
+                        }
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            setEditingMathFieldKey(null);
+                          }
+                        }}
+                        onChange={(e) =>
+                          mutateActiveForm(
+                            (prev) => ({ ...prev, description: e.target.value }),
+                            false
+                          )
+                        }
+                        placeholder={km ? 'ការពិពណ៌នាទម្រង់' : 'Form description'}
+                        className="w-full bg-transparent text-sm text-slate-600 dark:text-slate-300 border-b border-transparent focus:border-[#673AB7] focus:outline-none pb-1"
+                      />
+                      {editingMathFieldKey === 'form_desc' &&
+                        hasExplicitMathSyntax(activeForm.description) && (
+                          <div className="rounded-lg bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 px-3 py-1.5 text-sm text-slate-700 dark:text-slate-200 overflow-x-auto">
+                            <MathText text={activeForm.description} explicitOnly />
+                          </div>
+                        )}
+                    </>
                   )}
 
                   {/* QUICK OFFLINE + EMAIL MODE BAR (Use Email / Without Email) */}
@@ -1421,28 +1502,69 @@ export function GoogleFormBuilderView() {
                     <div className="px-5 sm:px-6 pb-5 pt-2">
                       {/* Question Title Row + STEM Formula Button + Image Button + Question Type Dropdown */}
                       <div className="flex flex-col sm:flex-row sm:items-center gap-3">
-                        <input
-                          type="text"
-                          value={q.title}
-                          maxLength={600}
-                          onChange={(e) =>
-                            updateQuestion(q.id, { title: e.target.value })
-                          }
-                          placeholder={
-                            q.type === 'section'
-                              ? km
-                                ? 'ចំណងជើងផ្នែក'
-                                : 'Section title'
-                              : km
-                                ? 'សំណួរ (អាចបញ្ចូលរូបមន្តគណិត រូប គីមី)'
-                                : 'Question (supports Math, Physics & Chemistry formulas)'
-                          }
-                          className={`flex-1 min-w-0 text-[15px] font-medium text-slate-900 dark:text-white focus:outline-none transition-colors ${
-                            isFocused
-                              ? 'bg-slate-50 dark:bg-slate-800/80 px-3.5 py-3 rounded-t-md border-b-2 border-slate-300 dark:border-slate-600 focus:border-[#673AB7]'
-                              : 'bg-transparent py-1.5 border-b border-transparent'
-                          }`}
-                        />
+                        {hasExplicitMathSyntax(q.title) &&
+                        editingMathFieldKey !== `q_title:${q.id}` ? (
+                          <div
+                            role="button"
+                            tabIndex={0}
+                            onClick={(e) => {
+                              if (isFocused) {
+                                e.stopPropagation();
+                                setEditingMathFieldKey(`q_title:${q.id}`);
+                              }
+                            }}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter' || e.key === ' ') {
+                                e.preventDefault();
+                                setFocusedCardId(q.id);
+                                setEditingMathFieldKey(`q_title:${q.id}`);
+                              }
+                            }}
+                            title={km ? 'ចុចដើម្បីកែប្រែ' : 'Click to edit'}
+                            className={`flex-1 min-w-0 text-[15px] font-medium text-slate-900 dark:text-white transition-colors cursor-text overflow-x-auto ${
+                              isFocused
+                                ? 'bg-slate-50 dark:bg-slate-800/80 px-3.5 py-3 rounded-t-md border-b-2 border-slate-300 dark:border-slate-600 hover:border-[#673AB7]'
+                                : 'bg-transparent py-1.5 border-b border-transparent hover:border-slate-200 dark:hover:border-slate-700'
+                            }`}
+                          >
+                            <MathText text={q.title} explicitOnly />
+                          </div>
+                        ) : (
+                          <input
+                            type="text"
+                            autoFocus={editingMathFieldKey === `q_title:${q.id}`}
+                            value={q.title}
+                            maxLength={600}
+                            onBlur={() =>
+                              setEditingMathFieldKey((cur) =>
+                                cur === `q_title:${q.id}` ? null : cur
+                              )
+                            }
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                e.preventDefault();
+                                setEditingMathFieldKey(null);
+                              }
+                            }}
+                            onChange={(e) =>
+                              updateQuestion(q.id, { title: e.target.value })
+                            }
+                            placeholder={
+                              q.type === 'section'
+                                ? km
+                                  ? 'ចំណងជើងផ្នែក'
+                                  : 'Section title'
+                                : km
+                                  ? 'សំណួរ (អាចបញ្ចូលរូបមន្តគណិត រូប គីមី)'
+                                  : 'Question (supports Math, Physics & Chemistry formulas)'
+                            }
+                            className={`flex-1 min-w-0 text-[15px] font-medium text-slate-900 dark:text-white focus:outline-none transition-colors ${
+                              isFocused
+                                ? 'bg-slate-50 dark:bg-slate-800/80 px-3.5 py-3 rounded-t-md border-b-2 border-slate-300 dark:border-slate-600 focus:border-[#673AB7]'
+                                : 'bg-transparent py-1.5 border-b border-transparent'
+                            }`}
+                          />
+                        )}
 
                         {isFocused && (
                           <div className="flex items-center gap-1.5 shrink-0">
@@ -1505,25 +1627,64 @@ export function GoogleFormBuilderView() {
                         )}
                       </div>
 
-                      {/* Live KaTeX + Chemistry Preview for Question Title */}
-                      {hasExplicitMathSyntax(q.title) && (
-                        <div className="mt-2 rounded-lg bg-purple-50/60 dark:bg-purple-950/30 border border-purple-200/70 dark:border-purple-800/60 px-3.5 py-2 text-[15px] text-slate-900 dark:text-white leading-relaxed overflow-x-auto">
-                          <MathText text={q.title} explicitOnly />
-                        </div>
-                      )}
+                      {/* Live KaTeX Preview only while actively editing raw math syntax */}
+                      {editingMathFieldKey === `q_title:${q.id}` &&
+                        hasExplicitMathSyntax(q.title) && (
+                          <div className="mt-2 rounded-lg bg-purple-50/60 dark:bg-purple-950/30 border border-purple-200/70 dark:border-purple-800/60 px-3.5 py-2 text-[15px] text-slate-900 dark:text-white leading-relaxed overflow-x-auto">
+                            <MathText text={q.title} explicitOnly />
+                          </div>
+                        )}
 
                       {q.type === 'section' && (
                         <div className="mt-2 space-y-1.5">
                           <div className="flex items-center gap-2">
-                            <input
-                              type="text"
-                              value={q.description || ''}
-                              onChange={(e) =>
-                                updateQuestion(q.id, { description: e.target.value })
-                              }
-                              placeholder={km ? 'ការពិពណ៌នាផ្នែក (ស្រេចចិត្ត)' : 'Description (optional)'}
-                              className="flex-1 bg-transparent text-sm text-slate-600 dark:text-slate-300 border-b border-slate-200 dark:border-slate-700 focus:border-[#673AB7] focus:outline-none py-1"
-                            />
+                            {q.description &&
+                            hasExplicitMathSyntax(q.description) &&
+                            editingMathFieldKey !== `q_desc:${q.id}` ? (
+                              <div
+                                role="button"
+                                tabIndex={0}
+                                onClick={(e) => {
+                                  if (isFocused) {
+                                    e.stopPropagation();
+                                    setEditingMathFieldKey(`q_desc:${q.id}`);
+                                  }
+                                }}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter' || e.key === ' ') {
+                                    e.preventDefault();
+                                    setFocusedCardId(q.id);
+                                    setEditingMathFieldKey(`q_desc:${q.id}`);
+                                  }
+                                }}
+                                title={km ? 'ចុចដើម្បីកែប្រែ' : 'Click to edit'}
+                                className="flex-1 text-sm text-slate-600 dark:text-slate-300 border-b border-slate-200 dark:border-slate-700 hover:border-[#673AB7] py-1 cursor-text overflow-x-auto"
+                              >
+                                <MathText text={q.description} explicitOnly />
+                              </div>
+                            ) : (
+                              <input
+                                type="text"
+                                autoFocus={editingMathFieldKey === `q_desc:${q.id}`}
+                                value={q.description || ''}
+                                onBlur={() =>
+                                  setEditingMathFieldKey((cur) =>
+                                    cur === `q_desc:${q.id}` ? null : cur
+                                  )
+                                }
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') {
+                                    e.preventDefault();
+                                    setEditingMathFieldKey(null);
+                                  }
+                                }}
+                                onChange={(e) =>
+                                  updateQuestion(q.id, { description: e.target.value })
+                                }
+                                placeholder={km ? 'ការពិពណ៌នាផ្នែក (ស្រេចចិត្ត)' : 'Description (optional)'}
+                                className="flex-1 bg-transparent text-sm text-slate-600 dark:text-slate-300 border-b border-slate-200 dark:border-slate-700 focus:border-[#673AB7] focus:outline-none py-1"
+                              />
+                            )}
                             {isFocused && (
                               <button
                                 type="button"
@@ -1539,11 +1700,13 @@ export function GoogleFormBuilderView() {
                               </button>
                             )}
                           </div>
-                          {q.description && hasExplicitMathSyntax(q.description) && (
-                            <div className="rounded-lg bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 px-3 py-1.5 text-xs text-slate-700 dark:text-slate-200 overflow-x-auto">
-                              <MathText text={q.description} explicitOnly />
-                            </div>
-                          )}
+                          {editingMathFieldKey === `q_desc:${q.id}` &&
+                            q.description &&
+                            hasExplicitMathSyntax(q.description) && (
+                              <div className="rounded-lg bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 px-3 py-1.5 text-xs text-slate-700 dark:text-slate-200 overflow-x-auto">
+                                <MathText text={q.description} explicitOnly />
+                              </div>
+                            )}
                         </div>
                       )}
 
@@ -1570,99 +1733,140 @@ export function GoogleFormBuilderView() {
                       {/* CHOICE OPTIONS EDITOR (Multiple choice, Checkboxes, Dropdown) */}
                       {isChoiceType && (
                         <div className="mt-4 space-y-2.5">
-                          {q.options.map((opt, optIdx) => (
-                            <div key={`${q.id}_opt_${optIdx}`} className="space-y-1">
-                              <div className="flex items-center gap-3 group">
-                                {q.type === 'multiple_choice' && (
-                                  <Circle className="w-4.5 h-4.5 text-slate-400 shrink-0" />
-                                )}
-                                {q.type === 'checkboxes' && (
-                                  <Square className="w-4.5 h-4.5 text-slate-400 shrink-0" />
-                                )}
-                                {q.type === 'dropdown' && (
-                                  <span className="w-5 text-xs font-mono tabular-nums text-slate-400 shrink-0">
-                                    {optIdx + 1}.
-                                  </span>
-                                )}
+                          {q.options.map((opt, optIdx) => {
+                            const optFieldKey = `q_opt:${q.id}:${optIdx}`;
+                            const optHasMath = hasExplicitMathSyntax(opt);
+                            const isEditingOptMath = editingMathFieldKey === optFieldKey;
+                            return (
+                              <div key={`${q.id}_opt_${optIdx}`} className="space-y-1">
+                                <div className="flex items-center gap-3 group">
+                                  {q.type === 'multiple_choice' && (
+                                    <Circle className="w-4.5 h-4.5 text-slate-400 shrink-0" />
+                                  )}
+                                  {q.type === 'checkboxes' && (
+                                    <Square className="w-4.5 h-4.5 text-slate-400 shrink-0" />
+                                  )}
+                                  {q.type === 'dropdown' && (
+                                    <span className="w-5 text-xs font-mono tabular-nums text-slate-400 shrink-0">
+                                      {optIdx + 1}.
+                                    </span>
+                                  )}
 
-                                <input
-                                  type="text"
-                                  value={opt}
-                                  maxLength={320}
-                                  onChange={(e) => {
-                                    const nextOpts = [...q.options];
-                                    nextOpts[optIdx] = e.target.value;
-                                    updateQuestion(q.id, { options: nextOpts });
-                                  }}
-                                  placeholder={`${km ? 'ជម្រើសទី' : 'Option'} ${optIdx + 1}`}
-                                  className="flex-1 bg-transparent text-sm text-slate-800 dark:text-slate-100 border-b border-transparent hover:border-slate-200 dark:hover:border-slate-700 focus:border-[#673AB7] focus:outline-none py-1.5"
-                                />
+                                  {optHasMath && !isEditingOptMath ? (
+                                    <div
+                                      role="button"
+                                      tabIndex={0}
+                                      onClick={(e) => {
+                                        if (isFocused) {
+                                          e.stopPropagation();
+                                          setEditingMathFieldKey(optFieldKey);
+                                        }
+                                      }}
+                                      onKeyDown={(e) => {
+                                        if (e.key === 'Enter' || e.key === ' ') {
+                                          e.preventDefault();
+                                          setFocusedCardId(q.id);
+                                          setEditingMathFieldKey(optFieldKey);
+                                        }
+                                      }}
+                                      title={km ? 'ចុចដើម្បីកែប្រែ' : 'Click to edit'}
+                                      className="flex-1 min-w-0 text-sm text-slate-800 dark:text-slate-100 border-b border-transparent hover:border-slate-200 dark:hover:border-slate-700 py-1.5 cursor-text overflow-x-auto"
+                                    >
+                                      <MathText text={opt} explicitOnly />
+                                    </div>
+                                  ) : (
+                                    <input
+                                      type="text"
+                                      autoFocus={isEditingOptMath}
+                                      value={opt}
+                                      maxLength={320}
+                                      onBlur={() =>
+                                        setEditingMathFieldKey((cur) =>
+                                          cur === optFieldKey ? null : cur
+                                        )
+                                      }
+                                      onKeyDown={(e) => {
+                                        if (e.key === 'Enter') {
+                                          e.preventDefault();
+                                          setEditingMathFieldKey(null);
+                                        }
+                                      }}
+                                      onChange={(e) => {
+                                        const nextOpts = [...q.options];
+                                        nextOpts[optIdx] = e.target.value;
+                                        updateQuestion(q.id, { options: nextOpts });
+                                      }}
+                                      placeholder={`${km ? 'ជម្រើសទី' : 'Option'} ${optIdx + 1}`}
+                                      className="flex-1 bg-transparent text-sm text-slate-800 dark:text-slate-100 border-b border-transparent hover:border-slate-200 dark:hover:border-slate-700 focus:border-[#673AB7] focus:outline-none py-1.5"
+                                    />
+                                  )}
 
-                                {isFocused && (
-                                  <button
-                                    type="button"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      setFormulaTarget({
-                                        kind: 'q_option',
-                                        qId: q.id,
-                                        optIdx,
-                                      });
-                                    }}
-                                    title={km ? 'បញ្ចូលរូបមន្តក្នុងជម្រើសនេះ (fx)' : 'Insert STEM formula in option'}
-                                    className="w-8 h-8 rounded-lg flex items-center justify-center text-purple-600 dark:text-purple-400 hover:bg-purple-50 dark:hover:bg-purple-950/40 cursor-pointer shrink-0"
-                                  >
-                                    <Sigma className="w-4 h-4" />
-                                  </button>
-                                )}
-
-                                {activeForm.settings.isQuiz &&
-                                  q.type !== 'checkboxes' && (
+                                  {isFocused && (
                                     <button
                                       type="button"
-                                      onClick={() =>
-                                        updateQuestion(q.id, {
-                                          correctOption:
-                                            q.correctOption === opt ? '' : opt,
-                                        })
-                                      }
-                                      title={km ? 'កំណត់ជាចម្លើយត្រឹមត្រូវ' : 'Mark as correct answer'}
-                                      className={`px-2 py-1 rounded-lg text-[11px] font-semibold inline-flex items-center gap-1 cursor-pointer shrink-0 ${
-                                        q.correctOption === opt
-                                          ? 'bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300'
-                                          : 'text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
-                                      }`}
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setFormulaTarget({
+                                          kind: 'q_option',
+                                          qId: q.id,
+                                          optIdx,
+                                        });
+                                      }}
+                                      title={km ? 'បញ្ចូលរូបមន្តក្នុងជម្រើសនេះ (fx)' : 'Insert STEM formula in option'}
+                                      className="w-8 h-8 rounded-lg flex items-center justify-center text-purple-600 dark:text-purple-400 hover:bg-purple-50 dark:hover:bg-purple-950/40 cursor-pointer shrink-0"
                                     >
-                                      <Check className="w-3.5 h-3.5" />
-                                      {q.correctOption === opt && (
-                                        <span>{km ? 'ត្រូវ' : 'Key'}</span>
-                                      )}
+                                      <Sigma className="w-4 h-4" />
                                     </button>
                                   )}
 
-                                {isFocused && q.options.length > 1 && (
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      const nextOpts = q.options.filter(
-                                        (_, i) => i !== optIdx
-                                      );
-                                      updateQuestion(q.id, { options: nextOpts });
-                                    }}
-                                    aria-label="Remove option"
-                                    className="w-8 h-8 rounded-full flex items-center justify-center text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer shrink-0"
-                                  >
-                                    <X className="w-4 h-4" />
-                                  </button>
+                                  {activeForm.settings.isQuiz &&
+                                    q.type !== 'checkboxes' && (
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          updateQuestion(q.id, {
+                                            correctOption:
+                                              q.correctOption === opt ? '' : opt,
+                                          })
+                                        }
+                                        title={km ? 'កំណត់ជាចម្លើយត្រឹមត្រូវ' : 'Mark as correct answer'}
+                                        className={`px-2 py-1 rounded-lg text-[11px] font-semibold inline-flex items-center gap-1 cursor-pointer shrink-0 ${
+                                          q.correctOption === opt
+                                            ? 'bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300'
+                                            : 'text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
+                                        }`}
+                                      >
+                                        <Check className="w-3.5 h-3.5" />
+                                        {q.correctOption === opt && (
+                                          <span>{km ? 'ត្រូវ' : 'Key'}</span>
+                                        )}
+                                      </button>
+                                    )}
+
+                                  {isFocused && q.options.length > 1 && (
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        const nextOpts = q.options.filter(
+                                          (_, i) => i !== optIdx
+                                        );
+                                        updateQuestion(q.id, { options: nextOpts });
+                                      }}
+                                      aria-label="Remove option"
+                                      className="w-8 h-8 rounded-full flex items-center justify-center text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer shrink-0"
+                                    >
+                                      <X className="w-4 h-4" />
+                                    </button>
+                                  )}
+                                </div>
+                                {isEditingOptMath && optHasMath && (
+                                  <div className="ml-7 rounded-md bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700/80 px-2.5 py-1 text-xs text-slate-800 dark:text-slate-100 overflow-x-auto">
+                                    <MathText text={opt} explicitOnly />
+                                  </div>
                                 )}
                               </div>
-                              {hasExplicitMathSyntax(opt) && (
-                                <div className="ml-7 rounded-md bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700/80 px-2.5 py-1 text-xs text-slate-800 dark:text-slate-100 overflow-x-auto">
-                                  <MathText text={opt} explicitOnly />
-                                </div>
-                              )}
-                            </div>
-                          ))}
+                            );
+                          })}
 
                           {q.hasOther && (
                             <div className="flex items-center gap-3">
@@ -2839,6 +3043,7 @@ export function GoogleFormBuilderView() {
         onClose={() => setFormulaTarget(null)}
         onInsert={(formattedFormula) => {
           if (!formulaTarget) return;
+          setEditingMathFieldKey(null);
           const appendFormula = (prev: string) =>
             prev.trim() ? `${prev} ${formattedFormula}` : formattedFormula;
 
