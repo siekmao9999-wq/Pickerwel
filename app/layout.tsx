@@ -50,7 +50,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         />
       </head>
       <body
-        className="bg-[#F8FAFC] text-slate-900 dark:bg-[#0F172A] dark:text-slate-100 antialiased"
+        className="bg-[#F6F8FC] text-slate-900 dark:bg-[#0B1120] dark:text-slate-100 antialiased"
         suppressHydrationWarning
       >
         <PickerwelProvider>

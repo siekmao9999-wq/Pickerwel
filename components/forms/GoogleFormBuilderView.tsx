@@ -46,6 +46,7 @@ import {
   Sigma,
   CloudUpload,
   RefreshCw,
+  Compass,
 } from 'lucide-react';
 import { usePickerwel } from '@/components/PickerwelProvider';
 import {
@@ -96,6 +97,7 @@ import { useFormPendingSync } from '@/hooks/useFormPendingSync';
 import { FormFiller } from './FormFiller';
 import { FormResponsesView } from './FormResponsesView';
 import { StemFormulaEditorModal } from './StemFormulaEditorModal';
+import { GraphGeometryStudioModal } from './GraphGeometryStudioModal';
 import { PendingSyncQueueModal } from './PendingSyncQueueModal';
 import { MathText, hasExplicitMathSyntax } from '@/components/MathText';
 
@@ -106,7 +108,8 @@ type FormulaTarget =
   | { kind: 'form_desc' }
   | { kind: 'q_title'; qId: string }
   | { kind: 'q_desc'; qId: string }
-  | { kind: 'q_option'; qId: string; optIdx: number };
+  | { kind: 'q_option'; qId: string; optIdx: number }
+  | { kind: 'q_answer'; qId: string };
 
 function QuestionTypeIcon({
   type,
@@ -171,6 +174,7 @@ export function GoogleFormBuilderView() {
   const [shareMode, setShareMode] = useState<'offline' | 'online'>('offline');
   const [wheelImportToast, setWheelImportToast] = useState<string | null>(null);
   const [formulaTarget, setFormulaTarget] = useState<FormulaTarget | null>(null);
+  const [graphTargetQId, setGraphTargetQId] = useState<string | null>(null);
   const [editingMathFieldKey, setEditingMathFieldKey] = useState<string | null>(null);
   const [syncQueueOpen, setSyncQueueOpen] = useState(false);
 
@@ -853,7 +857,7 @@ export function GoogleFormBuilderView() {
       />
 
       {/* TOP GOOGLE FORMS HEADER BAR */}
-      <header className="shrink-0 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800">
+      <header className="shrink-0 bg-white/95 dark:bg-[#0F172A]/95 backdrop-blur-md border-b border-slate-200/80 dark:border-slate-800/80">
         <div className="px-3 sm:px-5 pt-2.5 pb-1.5 flex flex-wrap items-center justify-between gap-2">
           {/* Left: Form Icon, Inline Title, Folder, Star, Auto-save */}
           <div className="flex items-center gap-2 min-w-0 flex-1">
@@ -1112,13 +1116,13 @@ export function GoogleFormBuilderView() {
         </div>
       </header>
 
-      {/* MAIN TINTED CANVAS (Google Forms Soft Lavender / Theme Tint) */}
+      {/* MAIN TINTED CANVAS (Soft Theme Tint + Architectural Dot Grid) */}
       <main
-        className="flex-1 overflow-y-auto px-3 sm:px-5 pt-5 pb-[calc(7rem+env(safe-area-inset-bottom))] md:pb-12 transition-colors dark:!bg-slate-950"
+        className="flex-1 overflow-y-auto px-3 sm:px-5 pt-6 pb-[calc(7rem+env(safe-area-inset-bottom))] md:pb-12 transition-colors dark:!bg-[#0B1120] canvas-dot-grid"
         style={{ backgroundColor: theme.softBgLight }}
       >
         {wheelImportToast && (
-          <div className="max-w-[760px] mx-auto mb-3 rounded-xl bg-slate-900 text-white px-4 py-2.5 text-xs font-medium flex items-center gap-2 shadow-md">
+          <div className="max-w-[760px] mx-auto mb-3.5 rounded-xl bg-slate-900 dark:bg-slate-800 text-white px-4 py-2.5 text-xs font-medium flex items-center gap-2 shadow-lg border border-slate-700/60">
             <Sparkles className="w-4 h-4 text-amber-400 shrink-0" />
             <span>{wheelImportToast}</span>
           </div>
@@ -1126,21 +1130,23 @@ export function GoogleFormBuilderView() {
 
         {/* TAB 1: QUESTIONS BUILDER */}
         {activeTab === 'questions' && (
-          <div className="max-w-[830px] mx-auto flex items-start justify-center gap-3.5">
+          <div className="max-w-[836px] mx-auto flex items-start justify-center gap-4">
             {/* Form Cards Column */}
-            <div className="flex-1 max-w-[760px] min-w-0 space-y-3.5">
+            <div className="flex-1 max-w-[764px] min-w-0 space-y-4">
               {/* FORM HEADER CARD */}
               <div
                 onClick={() => setFocusedCardId('header')}
-                className={`rounded-xl bg-white dark:bg-slate-900 border shadow-sm overflow-hidden transition-shadow ${
+                className={`rounded-2xl bg-white dark:bg-[#0F172A] border shadow-sm shadow-slate-900/[0.04] dark:shadow-black/25 overflow-hidden transition-all ${
                   focusedCardId === 'header'
-                    ? 'border-blue-400/90 dark:border-blue-500/80 ring-2 ring-blue-500/20'
-                    : 'border-slate-200/90 dark:border-slate-800'
+                    ? 'border-blue-400/90 dark:border-blue-500/75 ring-2 ring-blue-500/20'
+                    : 'border-slate-200/80 dark:border-slate-800/90 hover:border-slate-300/90 dark:hover:border-slate-700'
                 }`}
               >
                 <div
                   className="h-2.5 w-full"
-                  style={{ backgroundColor: theme.primary }}
+                  style={{
+                    background: `linear-gradient(90deg, ${theme.primary}, ${theme.accentBg})`,
+                  }}
                 />
                 <div className="p-5 sm:p-6 space-y-2.5">
                   {hasExplicitMathSyntax(activeForm.title) &&
@@ -1299,10 +1305,10 @@ export function GoogleFormBuilderView() {
                       })}
                     </div>
 
-                    <div className="flex flex-wrap items-center gap-1.5">
-                      <span className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 text-[11px] font-semibold">
-                        <WifiOff className="w-3 h-3" />
-                        <span>Offline</span>
+                    <div className="flex flex-wrap items-center gap-2.5">
+                      <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-600 dark:text-emerald-400">
+                        <WifiOff className="w-3.5 h-3.5" />
+                        <span>{km ? 'ប្រើ Offline បាន' : 'Offline Ready'}</span>
                       </span>
                       <button
                         type="button"
@@ -1310,7 +1316,7 @@ export function GoogleFormBuilderView() {
                           e.stopPropagation();
                           setOfflineFillOpen(true);
                         }}
-                        className="px-2.5 py-1 rounded-lg bg-slate-900 dark:bg-white text-white dark:text-slate-900 text-[11px] font-semibold inline-flex items-center gap-1 hover:opacity-90 cursor-pointer"
+                        className="px-3 py-1.5 rounded-xl bg-slate-900 dark:bg-white text-white dark:text-slate-900 text-[11px] font-semibold inline-flex items-center gap-1.5 hover:opacity-90 transition-opacity cursor-pointer whitespace-nowrap shadow-2xs"
                       >
                         <Play className="w-3 h-3 fill-current" />
                         <span>{km ? 'បំពេញផ្ទាល់ Offline' : 'Fill Offline'}</span>
@@ -1403,6 +1409,31 @@ export function GoogleFormBuilderView() {
                           {km ? 'MathType គណិត•រូប•គីមី' : 'MathType Studio'}
                         </span>
                       </button>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          const focusedQ =
+                            activeForm.questions.find(
+                              (item) => item.id === focusedCardId && item.type !== 'section'
+                            ) || activeForm.questions.find((item) => item.type !== 'section');
+                          if (focusedQ) {
+                            setFocusedCardId(focusedQ.id);
+                            setGraphTargetQId(focusedQ.id);
+                          }
+                        }}
+                        title={
+                          km
+                            ? 'សង់ក្រាបក្នុងប្លង់ 2D ក្នុងលំហរ 3D និងរូបធរណីមាត្រ'
+                            : 'Open 2D/3D Graph & Geometry Studio'
+                        }
+                        className="px-2.5 py-1 rounded-lg border border-indigo-200 dark:border-indigo-800 bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 text-[11px] font-semibold inline-flex items-center gap-1 hover:bg-indigo-100/80 dark:hover:bg-indigo-900/40 cursor-pointer"
+                      >
+                        <Compass className="w-3.5 h-3.5" />
+                        <span>
+                          {km ? 'សង់ក្រាប 2D/3D & ធរណីមាត្រ' : '2D/3D Graph & Geometry'}
+                        </span>
+                      </button>
                     </div>
                   </div>
 
@@ -1451,17 +1482,19 @@ export function GoogleFormBuilderView() {
                   <div
                     key={q.id}
                     onClick={() => setFocusedCardId(q.id)}
-                    className={`rounded-xl bg-white dark:bg-slate-900 border shadow-sm transition-all ${
+                    className={`rounded-2xl bg-white dark:bg-[#0F172A] border shadow-sm shadow-slate-900/[0.04] dark:shadow-black/25 transition-all ${
                       isFocused
-                        ? 'border-blue-500/80 dark:border-blue-400/80 ring-2 ring-blue-500/15 shadow-md'
-                        : 'border-slate-200/90 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700'
+                        ? 'border-blue-500/80 dark:border-blue-400/75 ring-2 ring-blue-500/18 shadow-md'
+                        : 'border-slate-200/80 dark:border-slate-800/90 hover:border-slate-300 dark:hover:border-slate-700'
                     }`}
                   >
                     {/* Section top bar if section type */}
                     {q.type === 'section' && (
                       <div
-                        className="px-5 py-1.5 rounded-t-xl text-[11px] font-semibold text-white uppercase tracking-wide"
-                        style={{ backgroundColor: theme.primary }}
+                        className="px-5 py-2 rounded-t-2xl text-xs font-semibold text-white tracking-wide"
+                        style={{
+                          background: `linear-gradient(90deg, ${theme.primary}, ${theme.accentBg})`,
+                        }}
                       >
                         {km ? 'ផ្នែក (Section)' : 'Section Header'}
                       </div>
@@ -1587,6 +1620,25 @@ export function GoogleFormBuilderView() {
 
                             {q.type !== 'section' && (
                               <>
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setGraphTargetQId(q.id);
+                                  }}
+                                  title={
+                                    km
+                                      ? 'សង់ក្រាប 2D/3D និងរូបធរណីមាត្រភ្ជាប់ក្នុងសំណួរ'
+                                      : 'Plot 2D/3D Graph or Geometry Figure'
+                                  }
+                                  className="min-h-[42px] px-2.5 rounded-lg border border-indigo-200 dark:border-indigo-800/80 bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100/80 dark:hover:bg-indigo-900/40 inline-flex items-center gap-1 text-xs font-bold cursor-pointer whitespace-nowrap"
+                                >
+                                  <Compass className="w-4 h-4" />
+                                  <span className="hidden sm:inline">
+                                    {km ? 'ក្រាប/ធរណីមាត្រ' : 'Graph/Geo'}
+                                  </span>
+                                </button>
+
                                 <button
                                   type="button"
                                   onClick={(e) => {
@@ -1944,17 +1996,202 @@ export function GoogleFormBuilderView() {
                         </div>
                       )}
 
-                      {/* SHORT ANSWER / PARAGRAPH PREVIEW */}
-                      {q.type === 'short_answer' && (
-                        <div className="mt-4 w-2/3 border-b border-dotted border-slate-300 dark:border-slate-700 pb-1.5 text-sm text-slate-400">
-                          {km ? 'អត្ថបទចម្លើយខ្លី' : 'Short answer text'}
-                        </div>
-                      )}
-                      {q.type === 'paragraph' && (
-                        <div className="mt-4 w-5/6 border-b border-dotted border-slate-300 dark:border-slate-700 pb-1.5 text-sm text-slate-400">
-                          {km ? 'អត្ថបទចម្លើយវែង' : 'Long answer text'}
-                        </div>
-                      )}
+                      {/* SHORT ANSWER / PARAGRAPH EDITABLE ANSWER BOX */}
+                      {q.type === 'short_answer' && (() => {
+                        const ansVal = q.correctOption || '';
+                        const ansFieldKey = `q_ans:${q.id}`;
+                        const ansHasMath = hasExplicitMathSyntax(ansVal);
+                        const isEditingAnsMath = editingMathFieldKey === ansFieldKey;
+                        return (
+                          <div className="mt-4 space-y-1.5">
+                            <div className="flex items-center gap-2 sm:max-w-[78%]">
+                              {ansHasMath && !isEditingAnsMath ? (
+                                <div
+                                  role="button"
+                                  tabIndex={0}
+                                  onClick={(e) => {
+                                    if (isFocused) {
+                                      e.stopPropagation();
+                                      setEditingMathFieldKey(ansFieldKey);
+                                    }
+                                  }}
+                                  onKeyDown={(e) => {
+                                    if (e.key === 'Enter' || e.key === ' ') {
+                                      e.preventDefault();
+                                      setFocusedCardId(q.id);
+                                      setEditingMathFieldKey(ansFieldKey);
+                                    }
+                                  }}
+                                  title={km ? 'ចុចដើម្បីកែប្រែ' : 'Click to edit'}
+                                  className="flex-1 min-w-0 border-b border-dotted border-slate-300 dark:border-slate-700 hover:border-slate-400 dark:hover:border-slate-500 pb-1.5 text-sm text-slate-800 dark:text-slate-100 cursor-text overflow-x-auto"
+                                >
+                                  <MathText text={ansVal} explicitOnly />
+                                </div>
+                              ) : (
+                                <input
+                                  type="text"
+                                  autoFocus={isEditingAnsMath}
+                                  value={ansVal}
+                                  maxLength={500}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setFocusedCardId(q.id);
+                                  }}
+                                  onBlur={() =>
+                                    setEditingMathFieldKey((cur) =>
+                                      cur === ansFieldKey ? null : cur
+                                    )
+                                  }
+                                  onKeyDown={(e) => {
+                                    if (e.key === 'Enter') {
+                                      e.preventDefault();
+                                      setEditingMathFieldKey(null);
+                                    }
+                                  }}
+                                  onChange={(e) =>
+                                    updateQuestion(q.id, { correctOption: e.target.value })
+                                  }
+                                  placeholder={km ? 'អត្ថបទចម្លើយខ្លី' : 'Short answer text'}
+                                  className="flex-1 min-w-0 bg-transparent border-b border-dotted border-slate-300 dark:border-slate-700 hover:border-slate-400 dark:hover:border-slate-500 focus:border-solid focus:border-[#673AB7] focus:outline-none pb-1.5 text-sm text-slate-800 dark:text-slate-100 placeholder:text-slate-400"
+                                />
+                              )}
+
+                              {isFocused && (
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setFormulaTarget({ kind: 'q_answer', qId: q.id });
+                                  }}
+                                  title={
+                                    km
+                                      ? 'បញ្ចូលរូបមន្តក្នុងចម្លើយខ្លី (MathType)'
+                                      : 'Insert STEM formula in short answer'
+                                  }
+                                  className="w-8 h-8 rounded-lg flex items-center justify-center text-purple-600 dark:text-purple-400 hover:bg-purple-50 dark:hover:bg-purple-950/40 cursor-pointer shrink-0"
+                                >
+                                  <Sigma className="w-4 h-4" />
+                                </button>
+                              )}
+
+                              {isFocused && ansVal.length > 0 && (
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    updateQuestion(q.id, { correctOption: '' });
+                                  }}
+                                  aria-label="Clear short answer"
+                                  className="w-7 h-7 rounded-full flex items-center justify-center text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer shrink-0"
+                                >
+                                  <X className="w-3.5 h-3.5" />
+                                </button>
+                              )}
+                            </div>
+
+                            {isEditingAnsMath && ansHasMath && (
+                              <div className="sm:max-w-[78%] rounded-md bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700/80 px-2.5 py-1 text-xs text-slate-800 dark:text-slate-100 overflow-x-auto">
+                                <MathText text={ansVal} explicitOnly />
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })()}
+
+                      {q.type === 'paragraph' && (() => {
+                        const ansVal = q.correctOption || '';
+                        const ansFieldKey = `q_ans:${q.id}`;
+                        const ansHasMath = hasExplicitMathSyntax(ansVal);
+                        const isEditingAnsMath = editingMathFieldKey === ansFieldKey;
+                        return (
+                          <div className="mt-4 space-y-1.5">
+                            <div className="flex items-start gap-2 sm:max-w-[88%]">
+                              {ansHasMath && !isEditingAnsMath ? (
+                                <div
+                                  role="button"
+                                  tabIndex={0}
+                                  onClick={(e) => {
+                                    if (isFocused) {
+                                      e.stopPropagation();
+                                      setEditingMathFieldKey(ansFieldKey);
+                                    }
+                                  }}
+                                  onKeyDown={(e) => {
+                                    if (e.key === 'Enter' || e.key === ' ') {
+                                      e.preventDefault();
+                                      setFocusedCardId(q.id);
+                                      setEditingMathFieldKey(ansFieldKey);
+                                    }
+                                  }}
+                                  title={km ? 'ចុចដើម្បីកែប្រែ' : 'Click to edit'}
+                                  className="flex-1 min-w-0 border-b border-dotted border-slate-300 dark:border-slate-700 hover:border-slate-400 dark:hover:border-slate-500 pb-1.5 text-sm text-slate-800 dark:text-slate-100 cursor-text overflow-x-auto whitespace-pre-wrap"
+                                >
+                                  <MathText text={ansVal} explicitOnly />
+                                </div>
+                              ) : (
+                                <textarea
+                                  rows={2}
+                                  autoFocus={isEditingAnsMath}
+                                  value={ansVal}
+                                  maxLength={1000}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setFocusedCardId(q.id);
+                                  }}
+                                  onBlur={() =>
+                                    setEditingMathFieldKey((cur) =>
+                                      cur === ansFieldKey ? null : cur
+                                    )
+                                  }
+                                  onChange={(e) =>
+                                    updateQuestion(q.id, { correctOption: e.target.value })
+                                  }
+                                  placeholder={km ? 'អត្ថបទចម្លើយវែង' : 'Long answer text'}
+                                  className="flex-1 min-w-0 bg-transparent border-b border-dotted border-slate-300 dark:border-slate-700 hover:border-slate-400 dark:hover:border-slate-500 focus:border-solid focus:border-[#673AB7] focus:outline-none pb-1.5 text-sm text-slate-800 dark:text-slate-100 placeholder:text-slate-400 resize-y"
+                                />
+                              )}
+
+                              {isFocused && (
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setFormulaTarget({ kind: 'q_answer', qId: q.id });
+                                  }}
+                                  title={
+                                    km
+                                      ? 'បញ្ចូលរូបមន្តក្នុងចម្លើយវែង (MathType)'
+                                      : 'Insert STEM formula in long answer'
+                                  }
+                                  className="w-8 h-8 rounded-lg flex items-center justify-center text-purple-600 dark:text-purple-400 hover:bg-purple-50 dark:hover:bg-purple-950/40 cursor-pointer shrink-0"
+                                >
+                                  <Sigma className="w-4 h-4" />
+                                </button>
+                              )}
+
+                              {isFocused && ansVal.length > 0 && (
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    updateQuestion(q.id, { correctOption: '' });
+                                  }}
+                                  aria-label="Clear long answer"
+                                  className="w-7 h-7 rounded-full flex items-center justify-center text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer shrink-0"
+                                >
+                                  <X className="w-3.5 h-3.5" />
+                                </button>
+                              )}
+                            </div>
+
+                            {isEditingAnsMath && ansHasMath && (
+                              <div className="sm:max-w-[88%] rounded-md bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700/80 px-2.5 py-1 text-xs text-slate-800 dark:text-slate-100 overflow-x-auto whitespace-pre-wrap">
+                                <MathText text={ansVal} explicitOnly />
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })()}
 
                       {/* LINEAR SCALE CONFIG */}
                       {q.type === 'linear_scale' && (
@@ -3036,11 +3273,30 @@ export function GoogleFormBuilderView() {
                     ? km
                       ? 'ការពិពណ៌នាផ្នែក'
                       : 'Section Description'
-                    : km
-                      ? 'អត្ថបទសំណួរ'
-                      : 'Question Text'
+                    : formulaTarget.kind === 'q_answer'
+                      ? km
+                        ? 'អត្ថបទចម្លើយ'
+                        : 'Answer Text'
+                      : km
+                        ? 'អត្ថបទសំណួរ'
+                        : 'Question Text'
         }
         onClose={() => setFormulaTarget(null)}
+        onOpenGraphStudio={() => {
+          const targetId =
+            formulaTarget && 'qId' in formulaTarget
+              ? formulaTarget.qId
+              : activeForm.questions.find(
+                  (item) => item.id === focusedCardId && item.type !== 'section'
+                )?.id ||
+                activeForm.questions.find((item) => item.type !== 'section')?.id ||
+                null;
+          setFormulaTarget(null);
+          if (targetId) {
+            setFocusedCardId(targetId);
+            setGraphTargetQId(targetId);
+          }
+        }}
         onInsert={(formattedFormula) => {
           if (!formulaTarget) return;
           setEditingMathFieldKey(null);
@@ -3083,6 +3339,17 @@ export function GoogleFormBuilderView() {
             }));
             return;
           }
+          if (formulaTarget.kind === 'q_answer') {
+            mutateActiveForm((prev) => ({
+              ...prev,
+              questions: prev.questions.map((item) =>
+                item.id === formulaTarget.qId
+                  ? { ...item, correctOption: appendFormula(item.correctOption || '') }
+                  : item
+              ),
+            }));
+            return;
+          }
           if (formulaTarget.kind === 'q_option') {
             mutateActiveForm((prev) => ({
               ...prev,
@@ -3099,6 +3366,24 @@ export function GoogleFormBuilderView() {
               }),
             }));
           }
+        }}
+      />
+
+      {/* INTERACTIVE 2D/3D GRAPH & GEOMETRY STUDIO MODAL */}
+      <GraphGeometryStudioModal
+        open={graphTargetQId !== null}
+        language={lang}
+        accentColor={theme.primary}
+        targetLabel={
+          graphTargetQId
+            ? activeForm.questions.find((item) => item.id === graphTargetQId)?.title ||
+              (km ? 'សំណួរ' : 'Question')
+            : undefined
+        }
+        onClose={() => setGraphTargetQId(null)}
+        onInsertImage={(dataUrl) => {
+          if (!graphTargetQId) return;
+          updateQuestion(graphTargetQId, { imageUrl: dataUrl });
         }}
       />
 

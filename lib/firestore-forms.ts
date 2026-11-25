@@ -83,7 +83,8 @@ function sanitizeQuestionsForCloud(questions: FormQuestion[]): Record<string, un
     scaleMax: Number(q.scaleMax ?? 5),
     scaleMinLabel: (q.scaleMinLabel || '').trim().slice(0, 60),
     scaleMaxLabel: (q.scaleMaxLabel || '').trim().slice(0, 60),
-    correctOption: (q.correctOption || '').trim().slice(0, 140),
+    ...(q.imageUrl && q.imageUrl.length <= 140_000 ? { imageUrl: q.imageUrl } : {}),
+    correctOption: (q.correctOption || '').trim().slice(0, 1000),
     points: Math.max(0, Math.min(100, Number(q.points ?? 0))),
   }));
 }
@@ -108,7 +109,11 @@ function parseCloudFormDoc(docId: string, data: Record<string, unknown>): Custom
       scaleMax: Number(q.scaleMax ?? 5),
       scaleMinLabel: String(q.scaleMinLabel || '').slice(0, 60),
       scaleMaxLabel: String(q.scaleMaxLabel || '').slice(0, 60),
-      correctOption: String(q.correctOption || '').slice(0, 140),
+      imageUrl:
+        typeof q.imageUrl === 'string' && q.imageUrl.length > 0 && q.imageUrl.length <= 140_000
+          ? q.imageUrl
+          : undefined,
+      correctOption: String(q.correctOption || '').slice(0, 1000),
       points: Number(q.points ?? 0),
     };
   });
